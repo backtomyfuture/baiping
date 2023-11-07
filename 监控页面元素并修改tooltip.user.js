@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         监控页面元素并修改tooltip
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @downloadURL https://github.com/backtomyfuture/baiping/edit/main/%E7%9B%91%E6%8E%A7%E9%A1%B5%E9%9D%A2%E5%85%83%E7%B4%A0%E5%B9%B6%E4%BF%AE%E6%94%B9tooltip.user.js
 // @updateURL   https://github.com/backtomyfuture/baiping/edit/main/%E7%9B%91%E6%8E%A7%E9%A1%B5%E9%9D%A2%E5%85%83%E7%B4%A0%E5%B9%B6%E4%BF%AE%E6%94%B9tooltip.user.js
 // @description  根据价差数据进行匹配，然后修改tooltip
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    // 计算两个日期之间的天数差异
+    // 计算两个日期之间的天数差异123
     const dateDiffInDays = (a, b) => {
         const msPerDay = 1000 * 60 * 60 * 24;
         return Math.floor((a - b) / msPerDay);
