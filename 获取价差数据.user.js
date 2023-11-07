@@ -2,8 +2,8 @@
 // @name         获取价差数据
 // @namespace    http://tampermonkey.net/
 // @version      1.4
-// @downloadURL http://www.tianjinairlines.cn:5000/sharing/vWgkxlsBy
-// @updateURL   http://www.tianjinairlines.cn:5000/sharing/vWgkxlsBy
+// @downloadURL https://github.com/backtomyfuture/baiping/blob/main/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.user.js
+// @updateURL   https://github.com/backtomyfuture/baiping/blob/main/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.user.js
 // @description  监控页面元素的变化并抓取价差数据
 // @author       傅强
 // @match        http://sfm.hnair.net/*
