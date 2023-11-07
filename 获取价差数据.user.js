@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         获取价差数据
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @downloadURL http://www.tianjinairlines.cn:5000/sharing/vWgkxlsBy
 // @updateURL   http://www.tianjinairlines.cn:5000/sharing/vWgkxlsBy
 // @description  监控页面元素的变化并抓取价差数据
