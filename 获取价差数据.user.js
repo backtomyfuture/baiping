@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         获取价差数据
 // @namespace    http://tampermonkey.net/
-// @version      1.4
-// @downloadURL https://github.com/backtomyfuture/baiping/blob/main/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.user.js
-// @updateURL   https://github.com/backtomyfuture/baiping/blob/main/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.user.js
+// @version      1.5
 // @description  监控页面元素的变化并抓取价差数据
 // @author       傅强
 // @match        http://sfm.hnair.net/*
 // @grant        GM_xmlhttpRequest
+// @downloadURL https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.user.js
+// @updateURL https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.meta.js
 // ==/UserScript==
 
 (function() {
@@ -38,22 +38,22 @@
     async function fetchAllData(depCityCode, arrCityCode, airCompony, authorizationToken, xsrfToken) {
 
         // 替换逻辑
-        if (depCityCode === 'PEK' || depCityCode === 'PKX') {
+        if (depCityCode.toUpperCase() === 'PEK' || depCityCode.toUpperCase() === 'PKX') {
             depCityCode = 'BJS';
         }
-        if (arrCityCode === 'PEK' || arrCityCode === 'PKX') {
+        if (arrCityCode.toUpperCase() === 'PEK' || arrCityCode.toUpperCase() === 'PKX') {
             arrCityCode = 'BJS';
         }
-        if (depCityCode === 'TFU') {
+        if (depCityCode.toUpperCase() === 'TFU') {
             depCityCode = 'CTU';
         }
-        if (arrCityCode === 'TFU') {
+        if (arrCityCode.toUpperCase() === 'TFU') {
             arrCityCode = 'CTU';
         }
-        if (depCityCode === 'XIY') {
+        if (depCityCode.toUpperCase() === 'XIY') {
             depCityCode = 'SIA';
         }
-        if (arrCityCode === 'XIY') {
+        if (arrCityCode.toUpperCase() === 'XIY') {
             arrCityCode = 'SIA';
         }
 
@@ -107,7 +107,8 @@
     });
 
     // 启动观察者以监视整个文档的变化
-    observer.observe(document, { childList: true, subtree: true });
+    // 原始红C的bug已经修复，暂时去掉了这个监听，提升页面响应速度。
+    //observer.observe(document, { childList: true, subtree: true });
 
     async function handleSpecificElementFound() {
         clearTimeout(debounceTimer);
@@ -133,19 +134,25 @@
                 const siblings = Array.from(parent.parentNode.children).filter(child => child !== parent);
                 console.log('已经获取了航段的父亲的兄弟元素', siblings)
                 const firstElement = siblings.find(sibling => sibling.querySelector('.ant-select-selection-item'));
-                console.log('已经获取了目标元素', firstElement)
-
-
 
                 if (firstElement) {
+                    console.log('已经获取了目标元素', firstElement)
                     cityCodeText = firstElement.textContent;
                 } else {
-                    // 如果第一个选择器没有找到元素，尝试获取第二个选择器的元素
                     const secondElement = document.querySelector("#basic_segs");
                     if (secondElement) {
+                        console.log('已经获取了目标元素', secondElement)
                         cityCodeText = secondElement.value;
+                    } else {
+                        // 新增查找ID中包含"segs"的元素逻辑
+                        const thirdElement = document.querySelector('input[id*="segs"]');
+                        if (thirdElement) {
+                            console.log('已经获取了目标元素', thirdElement)
+                            cityCodeText = thirdElement.value;
+                        }
                     }
                 }
+
 
                 const depCityCode = cityCodeText.substring(0, 3);
                 const arrCityCode = cityCodeText.substring(3, 6);
