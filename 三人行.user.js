@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         自动保持页面活跃并点击按钮
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.3.1
 // @description  通过模拟用户活动保持页面活跃，并自动点击按钮，即使页面在后台
 // @author       傅强
 // @match        http://hnatraining.yunxuetang.cn/kng/plan/document/*
 // @match        http://hnatraining.yunxuetang.cn/kng/plan/video/*
-// @downloadURL  https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.user.js
-// @updateURL    https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.meta.js
+// @downloadURL  https://greasyfork.org/zh-CN/scripts/500174-%E8%87%AA%E5%8A%A8%E4%BF%9D%E6%8C%81%E9%A1%B5%E9%9D%A2%E6%B4%BB%E8%B7%83%E5%B9%B6%E7%82%B9%E5%87%BB%E6%8C%89%E9%92%AE
+// @updateURL    https://greasyfork.org/zh-CN/scripts/500174-%E8%87%AA%E5%8A%A8%E4%BF%9D%E6%8C%81%E9%A1%B5%E9%9D%A2%E6%B4%BB%E8%B7%83%E5%B9%B6%E7%82%B9%E5%87%BB%E6%8C%89%E9%92%AE
 // @grant        none
 // ==/UserScript==
 
