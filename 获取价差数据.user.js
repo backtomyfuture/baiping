@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         获取价差数据并显示在航班状态栏
 // @namespace    http://tampermonkey.net/
-// @version      2.3
+// @version      2.3.1
 // @description  监控页面元素的变化并抓取价差数据，然后显示在航班的悬浮菜单中
 // @author       傅强
 // @match        http://sfm.hnair.net/*
@@ -28,18 +28,21 @@
         if (requestCache.has(cacheKey)) {
             const { data, timestamp } = requestCache.get(cacheKey);
             if (Date.now() - timestamp < REQUEST_TIMEOUT) return data;
+            requestCache.delete(cacheKey); // 清除过期缓存
         }
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 ...options,
                 onload: (response) => {
-                    requestCache.set(cacheKey, { data: response, timestamp: Date.now() });
-                    resolve(response);
+                    const data = JSON.parse(response.responseText);
+                    requestCache.set(cacheKey, { data, timestamp: Date.now() });
+                    resolve(data);
                 },
                 onerror: reject
             });
         });
     }
+
 
     // Standardize city codes
     function standardizeCityCode(code) {
@@ -60,7 +63,7 @@
                 headers
             });
 
-            const data = JSON.parse(response.responseText).obj.list;
+            const data = response.obj.list;
             if (data.length === 0) {
                 hasMoreData = false;
             } else {
@@ -71,6 +74,7 @@
 
         return allData;
     }
+
 
     // Fetch all data for a specific airline
     async function fetchAllData(depCityCode, arrCityCode, airline, authorizationToken, xsrfToken) {
@@ -132,8 +136,8 @@
                     jobId: 'job_18992',
                     status: '',
                     dataSource: 'clickHouse',
-                    startCmdTime: '2024-07-08 00:00:00',
-                    endCmdTime: '2024-07-08 23:59:59',
+                    startCmdTime: '2024-07-09 00:00:00',
+                    endCmdTime: '2024-07-09 23:59:59',
                     isCmd: '',
                     jobWarningType: ''
                 };
@@ -147,6 +151,7 @@
             }
         }, DEBOUNCE_DELAY);
     }
+
 
     // Get city code text from the DOM
     function getCityCodeText() {
@@ -239,31 +244,29 @@
 
                     let firstPart = '';
                     let secondPart = '';
+                    const thirdPart = '<div style="color: red; text-align: center;">预估票价仅供参考</div>';
+                    const horizontalLine = '<hr style="border: none; border-top: 1px solid white;">';
 
                     // 第一部分的逻辑
-                    if (remark["同期分天人数"] && remark["同期分天票价"]) {
-                        firstPart = `同期分天人数: ${remark["同期分天人数"]}\n同期分天票价: ${remark["同期分天票价"]}`;
+                    if (remark["同期航班情况"] && remark["同期销售情况"]) {
+                        firstPart = `<div>同期航班情况: </div>
+                             <div>${remark["同期航班情况"].substring(0, 5)}</div>
+                             <div>${remark["同期航班情况"].substring(5, 15)}</div>
+                             <div>${remark["同期销售情况"]}</div>`;
                     } else if (remark["同期航段票价"]) {
-                        firstPart = `同期航段票价: ${remark["同期航段票价"]}`;
+                        firstPart = `<div>同期航段票价: ${remark["同期航段票价"]}</div>`;
                     }
 
                     // 第二部分的逻辑
                     if (remark["预估月均票价"]) {
-                        secondPart = `预估月均价格: ${remark["预估月均票价"]}`;
-                    } else if (remark["同期月均价格"]) {
-                        secondPart = `同期月均价格: ${remark["同期月均价格"]}`;
-                    } else if (remark["环期月均价格"]) {
-                        secondPart = `环期月均价格: ${remark["环期月均价格"]}`;
+                        secondPart = `<div>预估月均票价: ${remark["预估月均票价"]}</div>`;
                     }
 
                     // 按需求组合展示内容
                     if (firstPart) {
-                        additionalContent += `\n${firstPart}\n${secondPart}`;
+                        additionalContent += `${horizontalLine}${firstPart}${horizontalLine}${secondPart}${horizontalLine}${thirdPart}`;
                     } else if (secondPart) {
-                        const secondPriority = [];
-                        if (remark["同期月均价格"]) secondPriority.push(`同期月均价格: ${remark["同期月均价格"]}`);
-                        if (remark["环期月均价格"]) secondPriority.push(`环期月均价格: ${remark["环期月均价格"]}`);
-                        additionalContent += `\n${secondPart}\n${secondPriority.join('\n')}`;
+                        additionalContent += `${horizontalLine}${secondPart}${horizontalLine}${thirdPart}`;
                     }
                 }
             });
@@ -293,11 +296,11 @@
         } else {
             if (fetchedData) processFetchedData();
             for (const [fltNo, values] of Object.entries(flightsData)) {
-                additionalContent += `\n${fltNo}\n${values.join('\n')}`;
+                additionalContent += `<div>${fltNo}</div><div>${values.join('<br>')}</div>`;
             }
         }
 
-        tooltipElement.innerText += additionalContent;
+        tooltipElement.innerHTML += additionalContent;
         tooltipElement.setAttribute('data-modified', 'true');
     };
 
@@ -365,5 +368,6 @@
     });
 
     tooltipObserver.observe(document.body, { childList: true, subtree: true });
+
 
 })();
