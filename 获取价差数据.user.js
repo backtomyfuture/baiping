@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         获取价差数据并显示在航班状态栏
 // @namespace    http://tampermonkey.net/
-// @version      2.3.4
+// @version      2.3.3
 // @description  监控页面元素的变化并抓取价差数据，然后显示在航班的悬浮菜单中
 // @author       傅强
 // @match        http://sfm.hnair.net/*
