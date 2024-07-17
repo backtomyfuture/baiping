@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         获取价差数据并显示在航班状态栏
 // @namespace    http://tampermonkey.net/
-// @version      2.3.2
+// @version      2.3.3
 // @description  监控页面元素的变化并抓取价差数据，然后显示在航班的悬浮菜单中
 // @author       傅强
 // @match        http://sfm.hnair.net/*
 // @grant        GM_xmlhttpRequest
-// @downloadURL  https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.user.js
-// @updateURL    https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE.meta.js
+// @downloadURL https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.user.js
+// @updateURL https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.meta.js
 // ==/UserScript==
 
 (function() {
@@ -136,8 +136,8 @@
                     jobId: 'job_18992',
                     status: '',
                     dataSource: 'clickHouse',
-                    startCmdTime: '2024-07-10 00:00:00',
-                    endCmdTime: '2024-07-10 23:59:59',
+                    startCmdTime: '2024-07-15 00:00:00',
+                    endCmdTime: '2024-07-15 23:59:59',
                     isCmd: '',
                     jobWarningType: ''
                 };
@@ -248,13 +248,14 @@
                     const horizontalLine = '<hr style="border: none; border-top: 1px solid white;">';
 
                     // 第一部分的逻辑
-                    if (remark["同期航班情况"] && remark["同期销售情况"]) {
-                        firstPart = `<div>同期航班情况: </div>
-                             <div>${remark["同期航班情况"].substring(0, 5)}</div>
-                             <div>${remark["同期航班情况"].substring(5, 15)}</div>
-                             <div>${remark["同期销售情况"]}</div>`;
-                    } else if (remark["同期航段票价"]) {
-                        firstPart = `<div>同期航段票价: ${remark["同期航段票价"]}</div>`;
+                    if (remark["同期航班销售情况"] && remark["机型"] && remark["时刻"]) {
+                        firstPart = `<div>历史同期: </div>
+                             <div>机型:${remark["机型"]}</div>
+                             <div>时刻:${remark["时刻"]}</div>
+                             <div>销售:${remark["同期航班销售情况"]}</div>`;
+                    } else if (remark["同期航段均价"]) {
+                        firstPart = `<div>历史同期: </div>
+                             <div>航段均价: ${remark["同期航段均价"]}</div>`;
                     }
 
                     // 第二部分的逻辑
