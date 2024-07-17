@@ -6,8 +6,9 @@
 // @author       傅强
 // @match        http://sfm.hnair.net/*
 // @grant        GM_xmlhttpRequest
-// @downloadURL https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.user.js
-// @updateURL https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.meta.js
+// @connect      update.greasyfork.org
+// @downloadURL  https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.user.js
+// @updateURL    https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.meta.js
 // ==/UserScript==
 
 (function() {
