@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         收益白屏系统增强插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  移动#refresh按钮并移除特定的重置按钮;新增右击菜单，可以更方便点击发送指令和发起调价；新增批量提交政策功能
 // @author       傅强
 // @match        http://sfm.hnair.net/*
 // @grant        none
+// @downloadURL https://update.greasyfork.org/scripts/495756/%E6%94%B6%E7%9B%8A%E7%99%BD%E5%B1%8F%E7%B3%BB%E7%BB%9F%E5%A2%9E%E5%BC%BA%E6%8F%92%E4%BB%B6.user.js
+// @updateURL https://update.greasyfork.org/scripts/495756/%E6%94%B6%E7%9B%8A%E7%99%BD%E5%B1%8F%E7%B3%BB%E7%BB%9F%E5%A2%9E%E5%BC%BA%E6%8F%92%E4%BB%B6.meta.js
 // ==/UserScript==
 
 (function() {
@@ -279,6 +281,7 @@
         const tabPaneValue = dataStorage.initialValues.tabPane;
         const firstCellValue = dataStorage.initialValues.firstCell;
         const secondCellValue = dataStorage.initialValues.secondCell;
+        const formattedDate = secondCellValue.replace(/-/g, '/');
 
         // 提取和存储指定格式的值
         const updateRecord = {
@@ -288,8 +291,8 @@
             flight: firstCellValue, // 航班
             cabin: oldValue, // 舱位
             salesPrice: newValue.replace(/\D/g, ''), // 销售价格，仅取数字部分
-            startDate: secondCellValue, // 航班开始日期
-            endDate: secondCellValue // 航班结束日期
+            startDate: formattedDate, // 航班开始日期
+            endDate: formattedDate // 航班结束日期
         };
 
         console.log(`[数据更新] 更新记录:`, updateRecord);
