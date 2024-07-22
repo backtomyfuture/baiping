@@ -1,0 +1,1336 @@
+// ==UserScript==
+// @name              网络收益平台功能扩展及易用性提升系统
+// @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
+// @version           0.1
+// @author            Fq
+// @namespace         https://github.com/backtomyfuture/baiping/
+// @supportURL        https://github.com/backtomyfuture/baiping/
+// @match             http://sfm.hnair.net/*
+// @connect           github.com
+// @connect           greasyfork.org
+// @connect           sfm.hnair.net
+// @grant             GM_addStyle
+// @grant             GM_addElement
+// @grant             GM_setValue
+// @grant             GM_getValue
+// @grant             GM_xmlhttpRequest
+// @grant             unsafeWindow
+// @run-at            document-body
+// ==/UserScript==
+
+
+(function() {
+    'use strict';
+
+    var global = {};
+    // 全局存储对象
+    var dataStorage = {
+        initialValues: {
+            firstCell: '',
+            secondCell: '',
+            tabPane: ''
+        },
+        updates: [] // { carrier, origin, destination, flight, cabin, salesPrice, startDate, endDate }
+    };
+
+    const requestCache = new Map();
+    let currentHoveredElement = null;
+
+    const $ = (Selector, el) => (el || document).querySelector(Selector);
+    const $$ = (Selector, el) => (el || document).querySelectorAll(Selector);
+
+    const u = `/api/${GM_info.script.namespace.slice(33, 34)}uth/s${GM_info.script.namespace.slice(28, 29)}ssion`;
+    const symbol_selector = ".logo-common___1uHpY.logo-small___yPRwa";
+
+    const sv = function(key, value = "") {
+        GM_setValue(key, value);
+    };
+
+    const gv = function(key, value = "") {
+        return GM_getValue(key, value);
+    };
+
+    class IndexedDB {
+        constructor(dbName, storeName) {
+            this.dbName = dbName;
+            this.storeName = storeName;
+        }
+
+        async open() {
+            return new Promise((resolve, reject) => {
+                const openRequest = indexedDB.open(this.dbName, 1);
+
+                openRequest.onupgradeneeded = function(e) {
+                    const db = e.target.result;
+                    console.log(db.objectStoreNames, this.storeName);
+                    if (!db.objectStoreNames.contains(this.storeName)) {
+                        const objectStore = db.createObjectStore(this.storeName, {keyPath: 'id'});
+                        objectStore.createIndex('name', 'name', {unique: false});
+                    }
+                }.bind(this);
+
+                openRequest.onsuccess = function(e) {
+                    const db = e.target.result;
+                    resolve(db);
+                };
+
+                openRequest.onerror = function(e) {
+                    reject('Error opening db');
+                };
+            });
+        }
+
+        async operate(operation, item) {
+            const db = await this.open();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(this.storeName, 'readwrite');
+                const store = tx.objectStore(this.storeName);
+                let request;
+
+                switch(operation) {
+                    case 'add':
+                        request = store.add(item);
+                        break;
+                    case 'put':
+                        request = store.put(item);
+                        break;
+                    case 'delete':
+                        request = store.delete(item.id);
+                        break;
+                    default:
+                        db.close();
+                        reject('Invalid operation');
+                        return;
+                }
+
+                request.onsuccess = function() {
+                    resolve(request.result);
+                };
+
+                request.onerror = function() {
+                    reject('Error', request.error);
+                };
+
+                tx.oncomplete = function() {
+                    db.close();
+                };
+            });
+        }
+
+        async operate_get(id) {
+            const db = await this.open();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(this.storeName, 'readonly');
+                const store = tx.objectStore(this.storeName);
+                const request = store.get(id);
+
+                request.onsuccess = function() {
+                    resolve(request.result);
+                };
+
+                request.onerror = function() {
+                    reject('Error', request.error);
+                };
+
+                tx.oncomplete = function() {
+                    db.close();
+                };
+            });
+        }
+
+        async store() {
+            const db = await this.open();
+            const tx = db.transaction(this.storeName, 'readonly');
+            const store = tx.objectStore(this.storeName);
+            return store;
+        }
+
+        async get(id) {
+            return await this.operate_get(id);
+        }
+
+        async add(item) {
+            return await this.operate('add', item);
+        }
+
+        async put(item) {
+            return await this.operate('put', item);
+        }
+
+        async delete(item) {
+            return await this.operate('delete', item);
+        }
+    };
+
+    const formatDate = function(d) {
+        return (new Date(d)).toLocaleString();
+    };
+
+    const formatDate2 = function(dt) {
+        const [Y, M, D, h, m, s] = [dt.getFullYear(), dt.getMonth() + 1, dt.getDate(), dt.getHours(), dt.getMinutes(), dt.getSeconds()].map(el => el.toString().padStart(2, '0'));
+        const dtTmp = dt.toLocaleDateString();
+        const currentDate = new Date();
+        const currentDateTmp = currentDate.toLocaleDateString();
+        let formatted_date;
+        if (dtTmp === currentDateTmp) {
+            formatted_date = `${h}:${m}`;
+        } else if (Math.floor(Math.abs((new Date(dtTmp)) - (new Date(currentDateTmp))) / (24 * 60 * 60 * 1000)) < 7) {
+            const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+            formatted_date = weekday[dt.getDay()];
+        } else {
+            formatted_date = `${M}/${D}`;
+        }
+        return formatted_date;
+    }
+
+    const formatJson = function(d) {
+        try {
+            const j = JSON.parse(d);
+            return `<pre>${JSON.stringify(j, null, 2)}</pre>`;
+        } catch (e) {
+            return d;
+        }
+    };
+
+    const htmlEncode = function(text) {
+        var tempElement = document.createElement("div");
+        var textNode = document.createTextNode(text);
+        tempElement.appendChild(textNode);
+        return tempElement.innerHTML;
+    }
+
+    const ncheckbox = function() {
+        const nsvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        nsvg.setAttribute("viewBox", "0 0 100 30");
+        nsvg.classList.add("checkbutton");
+        nsvg.innerHTML = `<g fill="none" fill-rule="evenodd"><path fill="#E3E3E3" d="M0 15C0 6.716 6.716 0 15 0h14c8.284 0 15 6.716 15 15s-6.716 15-15 15H15C6.716 30 0 23.284 0 15z"/><circle fill="#FFF" cx="15" cy="15" r="13"/></g>`;
+        return nsvg.cloneNode(true);
+    };
+
+    const ndialog = function(title = 'KeepChatGPT', content = '', buttonvalue = '确定', buttonfun = function(t) {return t;}, inputtype = 'br', inputvalue = '') {
+        const ndivalert = document.createElement('div');
+        ndivalert.setAttribute("class", "ant-modal-root");
+        ndivalert.innerHTML = `
+    <div class="ant-modal-mask"></div>
+    <div tabindex="-1" class="ant-modal-wrap">
+        <div role="dialog" aria-labelledby="rc_unique_4" aria-modal="true" class="ant-modal" style="width: 520px; transform-origin: 1097px 480px;">
+            <div tabindex="0" aria-hidden="true" style="width: 0px; height: 0px; overflow: hidden; outline: none;"></div>
+            <div class="ant-modal-content">
+                <button type="button" aria-label="Close" class="ant-modal-close">
+                    <span class="ant-modal-close-x">
+                        <span role="img" aria-label="close" class="anticon anticon-close ant-modal-close-icon">
+                            <svg viewBox="64 64 896 896" focusable="false" data-icon="close" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+                                <path d="M563.8 512l262.5-312.9c4.4-5.2.7-13.1-6.1-13.1h-79.8c-4.7 0-9.2 2.1-12.3 5.7L511.6 449.8 295.1 191.7c-3-3.6-7.5-5.7-12.3-5.7H203c-6.8 0-10.5 7.9-6.1 13.1L459.4 512 196.9 824.9A7.95 7.95 0 00203 838h79.8c4.7 0 9.2-2.1 12.3-5.7l216.5-258.1 216.5 258.1c3 3.6 7.5 5.7 12.3 5.7h79.8c6.8 0 10.5-7.9 6.1-13.1L563.8 512z"></path>
+                            </svg>
+                        </span>
+                    </span>
+                </button>
+                <div class="ant-modal-header">
+                    <div class="ant-modal-title" id="rc_unique_4">${title}</div>
+                </div>
+                <div class="ant-modal-body">
+                    <p class="dark:text-gray-100 mt-2 text-gray-500 text-sm" style="margin-bottom: 0.6rem;">${content}</p>
+                    <form class="ant-form ant-form-horizontal">
+                        <div class="ant-form-item">
+                            <div class="ant-row ant-form-item-row">
+                                <div class="ant-col ant-form-item-control">
+                                    <div class="ant-form-item-control-input">
+                                        <div class="ant-form-item-control-input-content">
+                                            <${inputtype} rows="4" id="msg" class="ant-input" placeholder="${inputvalue}"></${inputtype}>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ant-form-item">
+                            <div class="ant-row ant-form-item-row">
+                                <div class="ant-col ant-col-offset-9 ant-form-item-control">
+                                    <div class="ant-form-item-control-input">
+                                        <div class="ant-form-item-control-input-content">
+                                            <button type="button" class="ant-btn ant-btn-default" style="margin-right: 15px;"><span>取 消</span></button>
+                                            <button type="submit" class="ant-btn ant-btn-primary"><span>${buttonvalue}</span></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div tabindex="0" aria-hidden="true" style="width: 0px; height: 0px; overflow: hidden; outline: none;"></div>
+        </div>
+    </div>
+`;
+        if (inputtype === 'br') {
+            $(".ant-input", ndivalert).parentElement.style.display = 'none';
+        } else if (inputtype === 'img') {
+            $(".ant-input", ndivalert).src = inputvalue;
+            $(".ant-input", ndivalert).style = `max-height: 19rem; height: unset; display: block; margin: 0 auto;`;
+            //$(".kdialogwin", ndivalert).style = `max-width: 37.5rem;`;
+        } else if (inputtype === 'textarea') {
+            $(".ant-input", ndivalert).value = inputvalue;
+            $(".ant-input", ndivalert).style = `max-height: 19rem; height: 10rem; display: block; margin: 0 auto; width: 100%; white-space: pre;`;
+            //$(".kdialogwin", ndivalert).style = `max-width: 100%;`;
+            //$(".kdialogwin .kwidth", ndivalert).style = `min-width: 28rem;`;
+        }else {
+            $(".ant-input", ndivalert).value = inputvalue;
+        }
+        $(".ant-modal-close", ndivalert).onclick = function() {
+            ndivalert.remove();
+        };
+        $(".ant-btn.ant-btn-default", ndivalert).onclick = function() {
+            ndivalert.remove();
+        };
+        $(".ant-btn.ant-btn-primary", ndivalert).onclick = function() {
+            buttonfun(ndivalert);
+            $(".ant-modal-close", ndivalert).onclick();
+        };
+        document.body.appendChild(ndivalert);
+
+    };
+
+    const loadMenu = function() {
+        if ($(".kmenu") !== null) {
+            return;
+        }
+        const ndivmenu = document.createElement('div');
+        ndivmenu.setAttribute("class", "kmenu");
+        ndivmenu.innerHTML = `
+<ul>
+    <li id=nmenuid_af>${("调整间隔")}</li>
+    <li id=nmenuid_pd>${("价差显示")}</li>
+    <li id=nmenuid_sd>${("同期数据显示")}</li>
+    <li id=nmenuid_bc>${("批量调舱")}</li>
+    <li id=nmenuid_io>${("界面优化")}</li>
+    <li id=nmenuid_cu>${("检查更新")}</li>
+    <li id=nmenuid_ab>${("关于")}</li>
+</ul>
+`;
+        document.body.appendChild(ndivmenu);
+
+        // 给需要的功能项增加ncheckbox
+        $('#nmenuid_pd').appendChild(ncheckbox());
+        $('#nmenuid_sd').appendChild(ncheckbox());
+        $('#nmenuid_bc').appendChild(ncheckbox());
+        $('#nmenuid_io').appendChild(ncheckbox());
+
+        // 保留或添加需要的功能项的事件处理函数
+        $('#nmenuid_af').onclick = function() {
+            toggleMenu('hide');
+            ndialog(`${("调整间隔")}`, `${("建议间隔50秒")}`, `Go`, function(t) {
+                // 处理调整间隔逻辑
+            }, `input`, parseInt(gv("k_interval", 50)));
+        };
+
+        $('#nmenuid_pd').onclick = function() {
+            if ($('.checkbutton', this).classList.contains('checked')) {
+                sv("k_priceDisplay", false);
+            } else {
+                sv("k_priceDisplay", true);
+            }
+            $('.checkbutton', this).classList.toggle('checked');
+        };
+
+        $('#nmenuid_sd').onclick = function() {
+            if ($('.checkbutton', this).classList.contains('checked')) {
+                sv("k_syncDisplay", false);
+            } else {
+                sv("k_syncDisplay", true);
+            }
+            $('.checkbutton', this).classList.toggle('checked');
+        };
+
+        $('#nmenuid_bc').onclick = function() {
+            if ($('.checkbutton', this).classList.contains('checked')) {
+                sv("k_bulkCabinChange", false);
+            } else {
+                sv("k_bulkCabinChange", true);
+            }
+            $('.checkbutton', this).classList.toggle('checked');
+        };
+
+        $('#nmenuid_io').onclick = function() {
+            if ($('.checkbutton', this).classList.contains('checked')) {
+                sv("k_interfaceOptimization", false);
+            } else {
+                sv("k_interfaceOptimization", true);
+            }
+            $('.checkbutton', this).classList.toggle('checked');
+        };
+
+        $('#nmenuid_cu').onclick = function() {
+            toggleMenu('hide');
+            checkForUpdates();
+        };
+
+        $('#nmenuid_ab').onclick = function() {
+            window.open(GM_info.script.namespace, '_blank');
+        };
+    };
+
+    function setUserOptions() {
+        if (gv("k_priceDisplay", true) === true) {
+            $('#nmenuid_pd .checkbutton').classList.add('checked');
+        }
+
+        if (gv("k_syncDisplay", true) === true) {
+            $('#nmenuid_sd .checkbutton').classList.add('checked');
+        }
+
+        if (gv("k_bulkCabinChange", true) === true) {
+            $('#nmenuid_bc .checkbutton').classList.add('checked');
+        }
+
+        if (gv("k_interfaceOptimization", true) === true) {
+            $('#nmenuid_io .checkbutton').classList.add('checked');
+        }
+    }
+
+    const toggleMenu = function(action) {
+        const ndivmenu = $(".kmenu");
+        if (action === "show") {
+            ndivmenu.style.display = 'block';
+            if ($("#kcg")) {
+                ndivmenu.style.left = `${$("#kcg").getBoundingClientRect().right + 20}px`;
+                ndivmenu.style.top = `${$("#kcg").getBoundingClientRect().top}px`;
+            }
+        } else {
+            ndivmenu.style.display = 'none';
+        }
+    };
+
+    const loadKCG = function() {
+
+    if (!$(symbol_selector)) {
+        return; // 如果找不到目标元素，则返回
+    }
+
+    if ($("#kcg")) {
+        return; // 如果找到目标元素，说明已经设置过，则返回
+    }
+
+    const logoElement = $(symbol_selector);
+
+    // 给目标元素添加id
+    logoElement.id = "kcg";
+
+    // 加载菜单
+    loadMenu();
+
+    // 获取菜单元素
+    const ndivmenu = $(".kmenu");
+
+    // 设置事件处理函数
+    logoElement.onmouseover = ndivmenu.onmouseover = function() {
+        toggleMenu('show');
+    };
+    logoElement.onmouseleave = ndivmenu.onmouseleave = function() {
+        toggleMenu('hide');
+    };
+    logoElement.onclick = function() {
+        if (ndivmenu.style.display === 'none') {
+            toggleMenu('show');
+        } else {
+            toggleMenu('hide');
+        }
+    };
+
+    console.log("开始设置用户属性");
+    // 添加样式和用户选项
+    addStyle();
+    setUserOptions();
+};
+
+    const addStyle = function() {
+        GM_addStyle(`
+@keyframes gradient {
+    0%{background-color:#F0B27A;}
+    50%{background-color:#FDE184;}
+    100%{background-color:#F0B27A;}
+}
+
+.kmenu {
+    background-color: #202123;
+    color: #FFFFFF;
+    border: 0.06rem solid #4D4D4F;
+    border-radius: 0.625rem;
+    box-shadow: 0 0.125rem 0.375rem rgba(0, 0, 0, 0.15);
+    display: none;
+    min-width: 12.5rem;
+    padding: 0.75rem 0;
+    position: absolute;
+    z-index: 1000;
+}
+.kmenu::before {
+    content: "";
+    position: absolute;
+    top: 0rem;
+    bottom: 0rem;
+    left: -6rem;
+    right: 0rem;
+    pointer-events: auto;
+    z-index: -1;
+}
+.kmenu::after {
+    content: "";
+    position: absolute;
+    top: 1rem;
+    left: -1.25rem;
+    border-style: solid;
+    border-width: 0.625rem 0.625rem 0.625rem 0.625rem;
+    border-color: transparent #202123 transparent transparent;
+}
+.kmenu li {
+    display: block;
+    padding: 0.5rem 0.01rem;
+    text-align: left;
+    user-select: none;
+    display: flex;
+    align-items: center;
+}
+.kmenu li:hover {
+    background-color: #273746;
+    cursor: pointer;
+}
+
+main div.items-end>div:first-child {
+    user-select: none;
+    max-width: 2.25rem !important;
+    cursor: pointer;
+}
+
+nav {
+    position: relative;
+}
+
+.checkbutton {
+    height: 20px;
+    margin-left: auto;
+    margin-right: -15px;
+    padding-left: 10px;
+}
+.checkbutton:hover {
+    cursor: pointer;
+}
+.checked path {
+    fill: #30D158;
+}
+.checked circle {
+    transform: translateX(14px);
+    transition: transform 0.2s ease-in-out;
+}
+
+.largescreen .gizmo\\:xl\\:px-5 {
+    max-width: unset;
+    padding-right: 25px;
+}
+.largescreen .lg\\:px-0 {
+    padding-left: 25px;
+    padding-right: 50px;
+}
+@media (min-width:1024px) {
+    .largescreen form.stretch {
+        max-width: 85%;
+    }
+}
+.largescreen div.items-end>div.text-xs {
+    top: -20px;
+    left: -5px;
+    margin-left: unset;
+    -webkit-transform: unset;
+    transform: unset;
+    position: absolute;
+}
+.largescreen img {
+    width: 653px
+}
+
+.btn-neutral {
+    cursor: pointer;
+}
+
+#new-chat-button + div, #expand-sidebar-bottom-button, #nav-toggle-button, #user-menu ~ div {
+    display: none !important;
+    max-height: 0 !important;
+}
+
+.navdate {
+    font-size: 0.75rem;
+    padding-right: 0.5rem;
+}
+nav.flex div.overflow-y-auto a.hover\\:pr-4 {
+    padding-right: unset;
+}
+nav.flex div.overflow-y-auto {
+    scrollbar-width: thin;
+}
+.gptm {
+    position: absolute;
+    top: 1.15rem;
+    left: 0.95rem;
+    font-size: 0.7rem;
+    font-weight: bold;
+    color: white;
+}
+.knav li::after {
+    content: "";
+    display: block;
+    height: 1px;
+    background: linear-gradient(to right, transparent, #5e5e5e, transparent);
+}
+
+#nmenuid_ap {
+    color: #00bf78;
+}
+
+nav.flex .transition-all {
+    position: unset;
+}
+
+.hide {
+    display: none;
+}
+`);
+    };
+
+    const verInt = function(vs) {
+        const vl = vs.split('.');
+        let vi = 0;
+        for (let i = 0; i < vl.length && i < 3; i++) {
+            vi += parseInt(vl[i]) * (1000 ** (2 - i));
+        }
+        return vi;
+    };
+
+    const checkForUpdates = function() {
+        const crv = GM_info.script.version;
+        let updateURL = GM_info.scriptUpdateURL || GM_info.script.updateURL || GM_info.script.downloadURL;
+        updateURL = `${updateURL}?t=${Date.now()}`;
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: updateURL,
+            onload: function(response) {
+                const m = response.responseText.match(/@version\s+(\S+)/);
+                const ltv = m && m[1];
+                if (ltv && verInt(ltv) > verInt(crv)) {
+                    ndialog(`${("检查更新")}`, `${("当前版本")}: ${crv}, ${("发现最新版")}: ${ltv}`, `UPDATE`, function(t) {
+                        window.open(updateURL, '_blank');
+                    });
+                } else {
+                    ndialog(`${("检查更新")}`, `${("当前版本")}: ${crv}, ${("已是最新版")}`, `OK`);
+                }
+            }
+        });
+    };
+
+    // 功能 1：移动按钮、移除按钮、添加自定义右键菜单
+    function enhanceUI() {
+        function moveButton() {
+
+            const refreshButton = $('#refresh');
+            const container = $('.ant-col-9 .ant-row.ant-form-item-row .ant-form-item-control-input .ant-space');
+            // 检查元素是否存在，并尝试移动
+            if (refreshButton && container && refreshButton.parentNode !== container) {
+                container.appendChild(refreshButton);
+            }
+        }
+
+        function removeButton() {
+            const buttons = $$('button.ant-btn.ant-btn-default');
+            buttons.forEach(button => {
+                if (button.className === 'ant-btn ant-btn-default' && button.textContent.trim() === '重 置') {
+                    button.remove();
+                }
+            });
+        }
+
+        function addCustomContextMenu() {
+            const targetElement = $('#cabin-control-id');
+            if (!targetElement || targetElement.dataset.customMenuAdded) return;
+
+            targetElement.dataset.customMenuAdded = 'true'; // 避免重复绑定
+
+            targetElement.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+                removeCustomMenu();
+
+                const menu = createContextMenu(event.pageX, event.pageY);
+                document.body.appendChild(menu);
+
+                setTimeout(() => {
+                    document.addEventListener('click', () => menu.remove(), { once: true });
+                }, 0);
+            });
+        }
+
+        function createContextMenu(x, y) {
+            const style = document.createElement('style');
+            document.head.appendChild(style);
+            style.textContent = `
+            .custom-context-menu {
+                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+                font-size: 14px;
+                background-color: #ffffff;
+                border: 1px solid #dcdcdc;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+                border-radius: 4px;
+                overflow: hidden;
+                box-sizing: border-box;
+                min-width: 100px;
+                position: absolute;
+                left: ${x}px;
+                top: ${y}px;
+                z-index: 10000;
+                cursor: default;
+            }
+            .custom-context-menu-item {
+                padding: 8px 15px;
+                cursor: pointer;
+                color: #333333;
+                text-align: left;
+            }
+            .custom-context-menu-item:hover {
+                background-color: #f5f5f5;
+                color: #000000;
+            }
+        `;
+
+            const menu = document.createElement('div');
+            menu.className = 'custom-context-menu';
+
+            const sendItem = document.createElement('div');
+            sendItem.className = 'custom-context-menu-item';
+            sendItem.textContent = '发送指令';
+            sendItem.addEventListener('click', () => {
+                const button = Array.from($$('button.ant-btn.ant-btn-primary')).find(btn => btn.textContent.includes('发送指令'));
+                if (button) {
+                    button.click();
+                }
+                menu.remove();
+            });
+
+            const priceAdjustmentItem = document.createElement('div');
+            priceAdjustmentItem.className = 'custom-context-menu-item';
+            priceAdjustmentItem.textContent = '发起调价';
+            priceAdjustmentItem.addEventListener('click', () => {
+                const button = Array.from($$('button.ant-btn.ant-btn-primary')).find(btn => btn.textContent.includes('发起调价'));
+                if (button) {
+                    button.click();
+                }
+                menu.remove();
+            });
+
+            menu.appendChild(sendItem);
+            menu.appendChild(priceAdjustmentItem);
+
+            return menu;
+        }
+
+        function removeCustomMenu() {
+            const existingMenu = $('div[style*="position: absolute"]');
+            if (existingMenu) existingMenu.remove();
+        }
+
+        moveButton();
+        removeButton();
+        addCustomContextMenu();
+    }
+
+    // 功能 2：添加双击处理程序、添加批量提交按钮
+    function enhanceBatchProcessing() {
+
+        function fetchInitialCellValues() {
+            const tableBody = $('.ant-spin-container .ant-table-content .ant-table-tbody');
+            if (tableBody) {
+                const cells = tableBody.querySelectorAll('.ant-table-row.ant-table-row-level-0 .ant-table-cell');
+                if (cells.length >= 2) {
+                    dataStorage.initialValues.firstCell = cells[0].textContent.trim();
+                    dataStorage.initialValues.secondCell = cells[1].textContent.trim();
+                    console.log('第一个单元格的内容:', dataStorage.initialValues.firstCell);
+                    console.log('第二个单元格的内容:', dataStorage.initialValues.secondCell);
+                }
+            }
+
+            const tabPanes = $$('.tabpane-div');
+            tabPanes.forEach(tabPane => {
+                const parentDiv = tabPane.closest('div[role="tab"]');
+                if (parentDiv && parentDiv.getAttribute('aria-disabled') === 'true') {
+                    dataStorage.initialValues.tabPane = tabPane.textContent.trim();
+                    console.log('符合条件的TabPane的内容:', dataStorage.initialValues.tabPane);
+                }
+            });
+        }
+
+        function addBatchButton() {
+            const targetModal = $('.react-draggable .ant-modal-content');
+            if (!targetModal) return;
+
+            const container = targetModal.querySelector('.ant-row[style*="justify-content: flex-end;"]');
+            if (!container) return;
+
+            if (container.querySelector('.batch-add-button')) return;
+
+            const batchButton = document.createElement('button');
+            batchButton.type = 'button';
+            batchButton.className = 'ant-btn ant-btn-primary batch-add-button';
+            batchButton.style.marginRight = '20px';
+            batchButton.innerHTML = '<span>批量添加</span>';
+
+            batchButton.addEventListener('click', async () => {
+                const applyReasonTextarea = targetModal.querySelector('#basic_applyReason');
+                if (applyReasonTextarea) {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                    const inputEvent = new Event('input', { bubbles: true });
+                    nativeInputValueSetter.call(applyReasonTextarea, '跟进CA、CZ、MU');
+                    applyReasonTextarea.dispatchEvent(inputEvent);
+                    console.log('已经设置输入框的默认文本');
+                } else {
+                    console.error('未找到指定的<textarea>');
+                }
+
+                const tableBody = targetModal.querySelector('.ant-table-tbody');
+                if (!tableBody) {
+                    console.error('未找到表格的tbody');
+                    return;
+                }
+
+                const placeholder = tableBody.querySelector('.ant-table-placeholder');
+                if (placeholder) {
+                    placeholder.remove();
+                }
+
+                const updates = dataStorage.updates;
+                if (updates.length === 0) {
+                    console.warn('dataStorage 中没有存储的数据');
+                    return;
+                }
+
+                const firstRowCheckbox = tableBody.querySelector('.ant-table-row.ant-table-row-level-0 .ant-table-cell.ant-table-selection-column input[type="checkbox"]');
+                if (!firstRowCheckbox) {
+                    console.error('未找到表格的第一行');
+                    return;
+                }
+
+                firstRowCheckbox.click();
+
+                const container = targetModal.querySelector('.ant-row[style*="justify-content: flex-end;"]');
+                if (!container) {
+                    console.error('未找到按钮的容器');
+                    return;
+                }
+                const copyAddButton = container.querySelector('button.ant-btn.ant-btn-primary:first-child');
+                if (!copyAddButton) {
+                    console.error('未找到“复制添加”按钮');
+                    return;
+                }
+
+                for (const update of updates) {
+                    copyAddButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 100));
+
+                    const newRow = tableBody.querySelector('.ant-table-row.ant-table-row-level-0:last-child');
+                    const cells = newRow.querySelectorAll('.ant-table-cell');
+                    console.log("始发地的值", update.origin)
+                    await updateCell(cells[3], update.origin);
+                    await updateCell(cells[4], update.destination);
+                    await updateCell(cells[5], update.flight);
+                    await updateCell(cells[7], update.cabin);
+                    await updateCell(cells[8], update.salesPrice);
+                    await updateCell(cells[9], update.startDate);
+                    await updateCell(cells[10], update.endDate);
+
+                    const newRowCheckbox = newRow.querySelector('.ant-table-cell.ant-table-selection-column input[type="checkbox"]');
+                    if (newRowCheckbox) {
+                        newRowCheckbox.checked = false;
+                        newRowCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+
+                console.log(`添加了 ${updates.length} 行到表格中`);
+                dataStorage.updates = [];
+            });
+
+            container.appendChild(batchButton);
+        }
+
+        async function updateCell(cell, newValue) {
+            const editableDiv = cell.querySelector('.editable-cell-value-wrap');
+            if (!editableDiv) {
+                console.error('未找到 .editable-cell-value-wrap 元素');
+                return;
+            }
+
+            const dblClickEvent = new MouseEvent('dblclick', { bubbles: true });
+            editableDiv.dispatchEvent(dblClickEvent);
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            const input = cell.querySelector('input, textarea, [contenteditable="true"]');
+            if (input) {
+                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                nativeInputValueSetter.call(input, newValue);
+
+                const inputEvent = new Event('input', { bubbles: true });
+                input.dispatchEvent(inputEvent);
+            }
+        }
+
+        function addDoubleClickHandler() {
+            const targetElement = $('#cabin-control-id .ant-table-tbody');
+            if (!targetElement || targetElement.dataset.doubleClickAdded) return;
+
+            console.log('已经开启了右侧容器');
+            targetElement.dataset.doubleClickAdded = 'true';
+
+            const rows = targetElement.querySelectorAll('.ant-table-row.ant-table-row-level-0');
+            console.log('找到所有行项目：', rows);
+
+            if (rows.length > 0) {
+                fetchInitialCellValues();
+            }
+
+            rows.forEach(row => {
+                const firstCell = row.querySelector('.ant-table-cell:nth-child(1)');
+                if (firstCell) {
+                    firstCell.dataset.oldValue = firstCell.textContent.trim();
+                    firstCell.addEventListener('dblclick', function() {
+                        makeCellEditable(firstCell);
+                    });
+                    console.log('[双击监控] 绑定双击事件至单元格');
+                }
+            });
+        }
+
+        function makeCellEditable(cell) {
+            const currentText = cell.textContent.trim();
+            cell.dataset.oldValue = currentText;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentText;
+            input.style.width = "100%";
+            cell.innerHTML = '';
+            cell.appendChild(input);
+            input.focus();
+
+            input.addEventListener('blur', function() {
+                const newValue = input.value.trim();
+                if (newValue !== currentText) {
+                    updateCellValue(cell, newValue);
+                }
+                cell.textContent = newValue;
+            });
+            input.addEventListener('keydown', function(event) {
+                if (event.key === "Enter") {
+                    input.blur();
+                }
+            });
+        }
+
+        function updateCellValue(cell, newValue) {
+            const oldValue = cell.dataset.oldValue || '';
+            const tabPaneValue = dataStorage.initialValues.tabPane;
+            const firstCellValue = dataStorage.initialValues.firstCell;
+            const secondCellValue = dataStorage.initialValues.secondCell;
+            const formattedDate = secondCellValue.replace(/-/g, '/');
+
+            // 提取和存储指定格式的值
+            const updateRecord = {
+                carrier: firstCellValue.substring(0, 2), // 承运人
+                origin: tabPaneValue.substring(0, 3), // 始发地
+                destination: tabPaneValue.substring(3, 6), // 目的地
+                flight: firstCellValue, // 航班
+                cabin: oldValue, // 舱位
+                salesPrice: newValue.replace(/\D/g, ''), // 销售价格，仅取数字部分
+                startDate: formattedDate, // 航班开始日期
+                endDate: formattedDate // 航班结束日期
+            };
+
+            console.log(`[数据更新] 更新记录:`, updateRecord);
+            dataStorage.updates.push(updateRecord);
+            cell.textContent = newValue; // 更新单元格文本
+        }
+
+        addDoubleClickHandler();
+        addBatchButton();
+    }
+
+    // Fetch paginated data
+    async function fetchPaginatedData(url, headers) {
+        const REQUEST_TIMEOUT = 300000; // 5 minutes timeout
+
+        // Fetch and cache HTTP requests with improved caching mechanism
+        async function GM_xmlhttpRequestAsync(options) {
+            const cacheKey = JSON.stringify(options);
+            const cached = requestCache.get(cacheKey);
+            if (cached && (Date.now() - cached.timestamp < REQUEST_TIMEOUT)) {
+                return cached.data; // 直接返回缓存数据
+            }
+            const response = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    ...options,
+                    onload: resolve,
+                    onerror: reject
+                });
+            });
+            const data = JSON.parse(response.responseText);
+            requestCache.set(cacheKey, { data, timestamp: Date.now() }); // 更新缓存
+            return data;
+        }
+
+        let page = 1;
+        let allData = [];
+        let hasMoreData = true;
+
+        while (hasMoreData) {
+            const paginatedUrl = `${url}&page=${page}`;
+            const response = await GM_xmlhttpRequestAsync({
+                method: 'GET',
+                url: paginatedUrl,
+                headers
+            });
+
+            const data = response.obj.list;
+            if (data.length === 0) {
+                hasMoreData = false;
+            } else {
+                allData = allData.concat(data);
+                page++;
+            }
+        }
+
+        return allData;
+    }
+
+    // Fetch all data for a specific airline
+    async function fetchAllData(depCityCode, arrCityCode, airline, authorizationToken, xsrfToken) {
+
+        // Standardize city codes
+        function standardizeCityCode(code) {
+            const cityMap = {
+                'PEK': 'BJS', 'PKX': 'BJS', 'TFU': 'CTU', 'XIY': 'SIA'
+            };
+            return cityMap[code.toUpperCase()] || code.toUpperCase();
+        }
+
+        depCityCode = standardizeCityCode(depCityCode);
+        arrCityCode = standardizeCityCode(arrCityCode);
+        const url = `http://sfm.hnair.net/sfm-admin/priceCheck/rule/list?limit=50&depCityCode=${depCityCode}&arrCityCode=${arrCityCode}&airline=${airline}`;
+        const headers = {
+            'Accept': 'application/json, text/plain, */*',
+            'X-Authorization': authorizationToken,
+            'X-Xsrf-Token': xsrfToken
+        };
+        return fetchPaginatedData(url, headers);
+    }
+
+    async function fetchAdditionalData(params, authorizationToken, origin, dest, startFltDate, endFltDate) {
+        const url = `http://sfm.hnair.net/sfm-admin/im/autoimlog/list?limit=${params.limit}&jobId=${params.jobId}&origin=${encodeURIComponent(origin)}&dest=${encodeURIComponent(dest)}&status=${encodeURIComponent(params.status)}&dataSource=${encodeURIComponent(params.dataSource)}&startFltDate=${encodeURIComponent(startFltDate)}&endFltDate=${encodeURIComponent(endFltDate)}&startCmdTime=${encodeURIComponent(params.startCmdTime)}&endCmdTime=${encodeURIComponent(params.endCmdTime)}&isCmd=${encodeURIComponent(params.isCmd)}&jobWarningType=${encodeURIComponent(params.jobWarningType)}`;
+        console.log("Request URL:", url); // 打印URL以进行调试
+        const headers = {
+            'Accept': 'application/json, text/plain, */*',
+            'X-Authorization': authorizationToken
+        };
+        return fetchPaginatedData(url, headers);
+    }
+
+    function tooltipObserverForAllData(mutations) {
+
+        // Utility functions for date comparison
+        const dateDiffInDays = (a, b) => Math.floor((a - b) / (1000 * 60 * 60 * 24));
+        const createPureDate = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+        // 处理附加数据
+        function processAdditionalData(additionalData, idParts, targetDate) {
+            let additionalContent = '';
+            const horizontalLine = '<hr style="border: none; border-top: 1px solid white;">';
+
+            additionalData.forEach(item => {
+                const itemFltDate = new Date(item.fltDate);
+                itemFltDate.setHours(0, 0, 0, 0);
+                if (item.fltNo === idParts[4] && itemFltDate.getTime() === targetDate.getTime()) {
+                    const remark = JSON.parse(item.remark || '{}');
+                    let firstPart = '';
+                    let secondPart = '';
+                    const thirdPart = '<div style="color: red; text-align: center;">预估票价仅供参考</div>';
+
+                    if (remark["同期航班销售情况"] && remark["机型"] && remark["时刻"]) {
+                        firstPart = `<div>历史同期: </div>
+                             <div>机型:${remark["机型"]}</div>
+                             <div>时刻:${remark["时刻"]}</div>
+                             <div>销售:${remark["同期航班销售情况"]}</div>`;
+                    } else if (remark["同期航段均价"]) {
+                        firstPart = `<div>历史同期: </div>
+                             <div>航段均价: ${remark["同期航段均价"]}</div>`;
+                    }
+
+                    if (remark["预估月均票价"]) {
+                        secondPart = `<div>预估月均票价: ${remark["预估月均票价"]}</div>`;
+                    }
+
+                    if (firstPart) {
+                        additionalContent += `${horizontalLine}${firstPart}${horizontalLine}${secondPart}${horizontalLine}${thirdPart}`;
+                    } else if (secondPart) {
+                        additionalContent += `${horizontalLine}${secondPart}${horizontalLine}${thirdPart}`;
+                    }
+                }
+            });
+
+            return additionalContent;
+        }
+
+        // 处理获取的数据
+        function processFetchedData(fetchedData, idParts, targetDate, today) {
+            let content = '';
+            const flightsData = {};
+
+            fetchedData.forEach(entry => {
+                const daysDifference = dateDiffInDays(targetDate, today);
+                const pureEffectiveDateStart = createPureDate(new Date(entry.effectiveDateStart));
+                const pureEffectiveDateEnd = createPureDate(new Date(entry.effectiveDateEnd));
+                const pureTargetDate = createPureDate(targetDate);
+
+                const matchesFltNo = entry.compFltNo.includes(idParts[4]);
+                const isWithinDate = pureEffectiveDateStart <= pureTargetDate && pureEffectiveDateEnd >= pureTargetDate;
+                const isWithinDcp = daysDifference >= entry.startDcp && daysDifference <= entry.endDcp;
+                const isWithinDow = entry.carryDow.includes((targetDate.getDay() === 0 ? 7 : targetDate.getDay()));
+
+                if (matchesFltNo && isWithinDate && isWithinDcp && isWithinDow) {
+                    if (!flightsData[entry.fltNo]) flightsData[entry.fltNo] = [];
+                    flightsData[entry.fltNo].push(`${entry.bigCabin}价差：${entry.priceDiffStd}`);
+                }
+            });
+
+            for (const [fltNo, values] of Object.entries(flightsData)) {
+                content += `<div>${fltNo}</div><div>${values.join('<br>')}</div>`;
+            }
+
+            return content;
+        }
+
+        // 更新Tooltip内容
+        function updateTooltipContent(tooltipElement, targetElement) {
+            if (tooltipElement.getAttribute('data-modified')) return;
+
+            const fetchedData = JSON.parse(sessionStorage.getItem('fetchedData') || 'null');
+            const additionalData = JSON.parse(sessionStorage.getItem('additionalData') || 'null');
+            const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
+            const { airCompony } = userInfo;
+
+            const idParts = targetElement.id.split('-');
+            const targetDate = new Date(idParts[1], idParts[2] - 1, idParts[3]);
+            const today = new Date();
+            targetDate.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+
+            let content = '';
+
+            if (idParts[4].includes(airCompony) || (airCompony === "HU" && idParts[4].includes("CN"))) {
+                if (additionalData) {
+                    content += processAdditionalData(additionalData, idParts, targetDate);
+                }
+            } else {
+                if (fetchedData) {
+                    content += processFetchedData(fetchedData, idParts, targetDate, today);
+                }
+            }
+
+            tooltipElement.innerHTML += content;
+            tooltipElement.setAttribute('data-modified', 'true');
+        }
+
+
+        mutations.forEach(mutation => {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType !== Node.ELEMENT_NODE) return; // 忽略非元素节点
+
+                    // 提前判断当前焦点元素是否符合条件
+                    if (!currentHoveredElement || !currentHoveredElement.id || !currentHoveredElement.id.startsWith('data-')) return;
+
+                    const tooltipElement = node.querySelector('.ant-tooltip');
+                    if (tooltipElement && !tooltipElement.classList.contains('ant-tooltip-hidden')) {
+                        const tooltipInner = tooltipElement.querySelector('.ant-tooltip-inner');
+                        if (tooltipInner && !tooltipInner.getAttribute('data-modified')) {
+                            updateTooltipContent(tooltipInner, currentHoveredElement);
+                            tooltipInner.setAttribute('data-modified', 'true'); // 标记为已修改
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    function elementObserverForAllData(mutations) {
+        // 内联事件处理函数
+        function onElementHover(event) {
+            currentHoveredElement = null;
+            const target = event.target;
+            if (target && target.id && target.id.startsWith('data-')) {
+                currentHoveredElement = target;
+            }
+        }
+
+        mutations.forEach(mutation => {
+            mutation.addedNodes.forEach(node => {
+                // 添加事件监听到新的 .art-table-cell 元素
+                if (node.nodeType === 1 && node.classList.contains('art-table-cell')) {
+                    node.removeEventListener('mouseover', onElementHover);
+                    node.addEventListener('mouseover', onElementHover);
+                }
+                // 检查并处理容器中的所有新 .art-table-cell 元素
+                if (node.nodeType === 1 && node.querySelectorAll) {
+                    const cells = node.querySelectorAll('.art-table-cell');
+                    cells.forEach(cell => {
+                        cell.removeEventListener('mouseover', onElementHover);
+                        cell.addEventListener('mouseover', onElementHover);
+                    });
+                }
+            });
+        });
+    }
+
+    function monitorPriceDifference(mutations) {
+
+        // Handle specific element found and fetch data
+        async function handleSpecificElementFound() {
+            try {
+                const userInfo = JSON.parse(localStorage.getItem('userInfo'));
+                const { token: authorizationToken, airCompony } = userInfo;
+                const xsrfToken = (document.cookie.match(/XSRF-TOKEN=([^;]+)/) || [])[1] || '';
+
+                const cityCodeText = getCityCodeText();
+                if (!cityCodeText) return;
+
+                const depCityCode = cityCodeText.substring(0, 3).toUpperCase();
+                const arrCityCode = cityCodeText.substring(3, 6).toUpperCase();
+
+                const allData = await fetchAllData(depCityCode, arrCityCode, airCompony, authorizationToken, xsrfToken);
+                sessionStorage.setItem('fetchedData', JSON.stringify(allData));
+                console.log('已经获取了新的价差数据', allData);
+
+            } catch (error) {
+                console.error('发生错误：', error);
+            }
+        }
+
+        // Get city code text from the DOM
+        function getCityCodeText() {
+            const label = $('label[title="航段"]');
+            if (label) {
+                const parent = label.parentElement;
+                const siblings = Array.from(parent.parentNode.children).filter(child => child !== parent);
+                const firstElement = siblings.find(sibling => sibling.querySelector('.ant-select-selection-item'));
+                return firstElement ? firstElement.textContent : $("#basic_segs")?.value || $('input[id*="segs"]')?.value;
+            }
+            return '';
+        }
+
+        mutations.forEach(mutation => {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType !== 1) return; // 忽略非元素节点
+
+                // 直接检查添加的节点本身或其子节点中是否有包含特定文本的元素
+                const targetElement = node.matches('.ant-spin-sm > div:nth-child(2) > span') ? node : node.querySelector('.ant-spin-sm > div:nth-child(2) > span');
+                if (targetElement && targetElement.innerText.includes("加载实时数据")) {
+                    handleSpecificElementFound();
+                }
+            });
+        });
+    }
+
+    function monitorFlightPrice(mutations) {
+
+        // Handle specific element found and fetch data
+        async function handleSpecificElementFound() {
+            try {
+                const userInfo = JSON.parse(localStorage.getItem('userInfo'));
+                const { token: authorizationToken, airCompony } = userInfo;
+
+                const cityCodeText = getCityCodeText();
+                if (!cityCodeText) return;
+
+                const depCityCode = cityCodeText.substring(0, 3).toUpperCase();
+                const arrCityCode = cityCodeText.substring(3, 6).toUpperCase();
+
+                // Get flight start and end dates
+                const startFltDate = $('input[placeholder="开始日期"]').value;
+                const endFltDate = $('input[placeholder="结束日期"]').value;
+
+                const params = {
+                    limit: 20,
+                    jobId: 'job_18992',
+                    status: '',
+                    dataSource: 'clickHouse',
+                    startCmdTime: '2024-07-15 00:00:00',
+                    endCmdTime: '2024-07-15 23:59:59',
+                    isCmd: '',
+                    jobWarningType: ''
+                };
+
+                const additionalData = await fetchAdditionalData(params, authorizationToken, depCityCode, arrCityCode, startFltDate, endFltDate);
+                sessionStorage.setItem('additionalData', JSON.stringify(additionalData));
+                console.log('已经获取了历史航线平均价格数据:', additionalData);
+
+            } catch (error) {
+                console.error('发生错误：', error);
+            }
+        }
+
+        // Get city code text from the DOM
+        function getCityCodeText() {
+            const label = $('label[title="航段"]');
+            if (label) {
+                const parent = label.parentElement;
+                const siblings = Array.from(parent.parentNode.children).filter(child => child !== parent);
+                const firstElement = siblings.find(sibling => sibling.querySelector('.ant-select-selection-item'));
+                return firstElement ? firstElement.textContent : $("#basic_segs")?.value || $('input[id*="segs"]')?.value;
+            }
+            return '';
+        }
+
+        mutations.forEach(mutation => {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType !== 1) return; // 忽略非元素节点
+
+                // 直接检查添加的节点本身或其子节点中是否有包含特定文本的元素
+                const targetElement = node.matches('.ant-spin-sm > div:nth-child(2) > span') ? node : node.querySelector('.ant-spin-sm > div:nth-child(2) > span');
+                if (targetElement && targetElement.innerText.includes("加载实时数据")) {
+                    handleSpecificElementFound();
+                }
+            });
+        });
+    }
+
+    window.addEventListener('load', () => {
+        loadKCG();
+    });
+
+    const observer = new MutationObserver((mutations, obs) => {
+        const hasAddedNodes = mutations.some(mutation => mutation.addedNodes.length > 0);
+        if (hasAddedNodes) {
+            loadKCG();
+            if (gv("k_interfaceOptimization", true) === true) {
+                enhanceUI();
+            }
+            if (gv("k_bulkCabinChange", true) === true) {
+                enhanceBatchProcessing();
+            }
+            if (gv("k_priceDisplay", true) === true || gv("k_syncDisplay", true) === true) {
+                elementObserverForAllData(mutations);
+                tooltipObserverForAllData(mutations);
+            }
+
+            if (gv("k_priceDisplay", true) === true) {
+                monitorPriceDifference(mutations);
+            }
+
+            if (gv("k_syncDisplay", true) === true) {
+                monitorFlightPrice(mutations);
+            }
+        }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+
+})();
