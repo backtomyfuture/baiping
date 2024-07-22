@@ -9,6 +9,8 @@
 // @connect           github.com
 // @connect           greasyfork.org
 // @connect           sfm.hnair.net
+// @downloadURL       https://greasyfork.org/zh-CN/scripts/501457-%E7%BD%91%E7%BB%9C%E6%94%B6%E7%9B%8A%E5%B9%B3%E5%8F%B0%E5%8A%9F%E8%83%BD%E6%89%A9%E5%B1%95%E5%8F%8A%E6%98%93%E7%94%A8%E6%80%A7%E6%8F%90%E5%8D%87%E7%B3%BB%E7%BB%9F
+// @updateURL         https://greasyfork.org/zh-CN/scripts/501457-%E7%BD%91%E7%BB%9C%E6%94%B6%E7%9B%8A%E5%B9%B3%E5%8F%B0%E5%8A%9F%E8%83%BD%E6%89%A9%E5%B1%95%E5%8F%8A%E6%98%93%E7%94%A8%E6%80%A7%E6%8F%90%E5%8D%87%E7%B3%BB%E7%BB%9F
 // @grant             GM_addStyle
 // @grant             GM_addElement
 // @grant             GM_setValue
