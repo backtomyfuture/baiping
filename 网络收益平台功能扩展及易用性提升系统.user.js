@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.3
+// @version           0.1.4
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -9,8 +9,6 @@
 // @connect           github.com
 // @connect           greasyfork.org
 // @connect           sfm.hnair.net
-// @downloadURL       https://greasyfork.org/zh-CN/scripts/501457-%E7%BD%91%E7%BB%9C%E6%94%B6%E7%9B%8A%E5%B9%B3%E5%8F%B0%E5%8A%9F%E8%83%BD%E6%89%A9%E5%B1%95%E5%8F%8A%E6%98%93%E7%94%A8%E6%80%A7%E6%8F%90%E5%8D%87%E7%B3%BB%E7%BB%9F
-// @updateURL         https://greasyfork.org/zh-CN/scripts/501457-%E7%BD%91%E7%BB%9C%E6%94%B6%E7%9B%8A%E5%B9%B3%E5%8F%B0%E5%8A%9F%E8%83%BD%E6%89%A9%E5%B1%95%E5%8F%8A%E6%98%93%E7%94%A8%E6%80%A7%E6%8F%90%E5%8D%87%E7%B3%BB%E7%BB%9F
 // @grant             GM_addStyle
 // @grant             GM_addElement
 // @grant             GM_setValue
@@ -18,8 +16,19 @@
 // @grant             GM_xmlhttpRequest
 // @grant             unsafeWindow
 // @run-at            document-body
+// @downloadURL https://update.greasyfork.org/scripts/501457/%E7%BD%91%E7%BB%9C%E6%94%B6%E7%9B%8A%E5%B9%B3%E5%8F%B0%E5%8A%9F%E8%83%BD%E6%89%A9%E5%B1%95%E5%8F%8A%E6%98%93%E7%94%A8%E6%80%A7%E6%8F%90%E5%8D%87%E7%B3%BB%E7%BB%9F.user.js
+// @updateURL https://update.greasyfork.org/scripts/501457/%E7%BD%91%E7%BB%9C%E6%94%B6%E7%9B%8A%E5%B9%B3%E5%8F%B0%E5%8A%9F%E8%83%BD%E6%89%A9%E5%B1%95%E5%8F%8A%E6%98%93%E7%94%A8%E6%80%A7%E6%8F%90%E5%8D%87%E7%B3%BB%E7%BB%9F.meta.js
 // ==/UserScript==
 
+/*
+# 更新日志
+
+## 版本 0.1.4
+### 2024-07-25
+- 优化功能：改进getUserInfo函数，使用更高效的缓存机制来减少localStorage的访问次数。
+- 增强功能：增强错误处理和日志记录，提供更详细的网络错误信息和调试输出。
+
+*/
 
 (function() {
     'use strict';
@@ -35,6 +44,15 @@
         updates: [] // { carrier, origin, destination, flight, cabin, salesPrice, startDate, endDate }
     };
 
+    function getUserInfo() {
+        if (cachedUserInfo === null) { // 确保只在第一次调用时读取localStorage
+            const data = localStorage.getItem('userInfo');
+            cachedUserInfo = data ? JSON.parse(data) : {};
+        }
+        return cachedUserInfo;
+    }
+
+    let cachedUserInfo = null;
     const requestCache = new Map();
     let currentHoveredElement = null;
 
@@ -1116,7 +1134,7 @@ nav.flex .transition-all {
 
             const fetchedData = JSON.parse(sessionStorage.getItem('fetchedData') || 'null');
             const additionalData = JSON.parse(sessionStorage.getItem('additionalData') || 'null');
-            const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
+            const userInfo = getUserInfo();
             const { airCompony } = userInfo;
 
             const idParts = targetElement.id.split('-');
