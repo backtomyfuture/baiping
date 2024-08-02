@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         获取价差数据并显示在航班状态栏
 // @namespace    http://tampermonkey.net/
-// @version      2.3.3
+// @version      2.3.5
 // @description  监控页面元素的变化并抓取价差数据，然后显示在航班的悬浮菜单中
 // @author       傅强
 // @match        http://sfm.hnair.net/*
 // @grant        GM_xmlhttpRequest
 // @connect      update.greasyfork.org
-// @downloadURL  https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.user.js
-// @updateURL    https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.meta.js
+// @downloadURL https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.user.js
+// @updateURL https://update.greasyfork.org/scripts/479220/%E8%8E%B7%E5%8F%96%E4%BB%B7%E5%B7%AE%E6%95%B0%E6%8D%AE%E5%B9%B6%E6%98%BE%E7%A4%BA%E5%9C%A8%E8%88%AA%E7%8F%AD%E7%8A%B6%E6%80%81%E6%A0%8F.meta.js
 // ==/UserScript==
 
 (function() {
@@ -23,25 +23,23 @@
         'PEK': 'BJS', 'PKX': 'BJS', 'TFU': 'CTU', 'XIY': 'SIA'
     };
 
-    // Fetch and cache HTTP requests
+    // Fetch and cache HTTP requests with improved caching mechanism
     async function GM_xmlhttpRequestAsync(options) {
         const cacheKey = JSON.stringify(options);
-        if (requestCache.has(cacheKey)) {
-            const { data, timestamp } = requestCache.get(cacheKey);
-            if (Date.now() - timestamp < REQUEST_TIMEOUT) return data;
-            requestCache.delete(cacheKey); // 清除过期缓存
+        const cached = requestCache.get(cacheKey);
+        if (cached && (Date.now() - cached.timestamp < REQUEST_TIMEOUT)) {
+            return cached.data; // 直接返回缓存数据
         }
-        return new Promise((resolve, reject) => {
+        const response = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 ...options,
-                onload: (response) => {
-                    const data = JSON.parse(response.responseText);
-                    requestCache.set(cacheKey, { data, timestamp: Date.now() });
-                    resolve(data);
-                },
+                onload: resolve,
                 onerror: reject
             });
         });
+        const data = JSON.parse(response.responseText);
+        requestCache.set(cacheKey, { data, timestamp: Date.now() }); // 更新缓存
+        return data;
     }
 
 
@@ -108,6 +106,48 @@
         }
     }
 
+    function setCommandTimes() {
+
+        function formatMonth(month) {
+            return month < 9 ? `0${month + 1}` : `${month + 1}`;
+        }
+
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = today.getMonth(); // 注意：0 表示1月，11 表示12月
+        let startCmdTime, endCmdTime;
+
+        const dayOfMonth = today.getDate();
+
+        if (dayOfMonth === 1) {
+            // 当天是1号，设置为上月15号0:00到23:59
+            const lastMonth = new Date(year, month - 1, 15);
+            startCmdTime = `${lastMonth.getFullYear()}-${formatMonth(lastMonth.getMonth())}-15 00:00:00`;
+            endCmdTime = `${lastMonth.getFullYear()}-${formatMonth(lastMonth.getMonth())}-15 23:59:59`;
+        } else if (dayOfMonth >= 2 && dayOfMonth <= 15) {
+            // 当天是2号到15号，设置为当月1号0:00到23:59
+            startCmdTime = `${year}-${formatMonth(month)}-01 00:00:00`;
+            endCmdTime = `${year}-${formatMonth(month)}-01 23:59:59`;
+        } else {
+            // 当天是16号到月底，设置为当月15号0:00到23:59
+            startCmdTime = `${year}-${formatMonth(month)}-15 00:00:00`;
+            endCmdTime = `${year}-${formatMonth(month)}-15 23:59:59`;
+        }
+
+        const params = {
+            limit: 20,
+            jobId: 'job_18992',
+            status: '',
+            dataSource: 'clickHouse',
+            startCmdTime: startCmdTime,
+            endCmdTime: endCmdTime,
+            isCmd: '',
+            jobWarningType: ''
+        };
+
+        //console.log("构造的日期参数为：", params);
+        return params;
+    }
 
     // Handle specific element found and fetch data
     async function handleSpecificElementFound() {
@@ -132,17 +172,7 @@
                 const startFltDate = document.querySelector('input[placeholder="开始日期"]').value;
                 const endFltDate = document.querySelector('input[placeholder="结束日期"]').value;
 
-                const params = {
-                    limit: 20,
-                    jobId: 'job_18992',
-                    status: '',
-                    dataSource: 'clickHouse',
-                    startCmdTime: '2024-07-15 00:00:00',
-                    endCmdTime: '2024-07-15 23:59:59',
-                    isCmd: '',
-                    jobWarningType: ''
-                };
-
+                const params = setCommandTimes();
                 const additionalData = await fetchAdditionalData(params, authorizationToken, depCityCode, arrCityCode, startFltDate, endFltDate);
                 sessionStorage.setItem('additionalData', JSON.stringify(additionalData));
                 console.log('已经获取了历史航线平均价格数据:', additionalData);
@@ -336,13 +366,13 @@
 
     const elementObserver = new MutationObserver(mutations => {
         mutations.forEach(mutation => {
-            if (mutation.type === 'childList' || mutation.type === 'attributes') {
+            if (mutation.type === 'childList') {
                 attachListenersToTargets();
             }
         });
     });
 
-    elementObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
+    elementObserver.observe(document.body, { childList: true, subtree: true});
 
     const tooltipObserver = new MutationObserver(mutations => {
         mutations.forEach(mutation => {
