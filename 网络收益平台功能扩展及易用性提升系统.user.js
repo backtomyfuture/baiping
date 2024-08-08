@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.9
+// @version           0.1.10
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -56,6 +56,11 @@
 ## 版本 0.1.9
 ### 2024-08-08
 - 修复BUG：针对observeTableChanges，监控表格的函数，新增了#fltNos的前提，来确实是不是在长指令的界面。
+
+## 版本 0.1.10
+### 2024-08-08
+- 修复BUG：优化checkForUpdates，检查时候使用updateURL提速，下载时候使用downloadURL。
+
 
 */
 
@@ -692,17 +697,20 @@ nav.flex .transition-all {
 
     const checkForUpdates = function() {
         const crv = GM_info.script.version;
-        let updateURL = GM_info.scriptUpdateURL || GM_info.script.updateURL || GM_info.script.downloadURL;
+        let updateURL = GM_info.scriptUpdateURL || GM_info.script.updateURL;
+        let downloadURL = GM_info.script.downloadURL;
         updateURL = `${updateURL}?t=${Date.now()}`;
+        downloadURL = `${downloadURL}?t=${Date.now()}`;
+        console.log(updateURL)
         GM_xmlhttpRequest({
             method: "GET",
             url: updateURL,
             onload: function(response) {
-                const m = response.responseText.match(/data-script-version="(\d+\.\d+\.\d+)"/);
+                const m = response.responseText.match(/@version\s+(\S+)/);
                 const ltv = m && m[1];
                 if (ltv && verInt(ltv) > verInt(crv)) {
                     ndialog(`${("检查更新")}`, `${("当前版本")}: ${crv}, ${("发现最新版")}: ${ltv}`, `UPDATE`, function(t) {
-                        window.open(updateURL, '_blank');
+                        window.open(downloadURL, '_blank');
                     });
                 } else {
                     ndialog(`${("检查更新")}`, `${("当前版本")}: ${crv}, ${("已是最新版")}`, `OK`);
