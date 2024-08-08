@@ -701,7 +701,6 @@ nav.flex .transition-all {
         let downloadURL = GM_info.script.downloadURL;
         updateURL = `${updateURL}?t=${Date.now()}`;
         downloadURL = `${downloadURL}?t=${Date.now()}`;
-        console.log(updateURL)
         GM_xmlhttpRequest({
             method: "GET",
             url: updateURL,
