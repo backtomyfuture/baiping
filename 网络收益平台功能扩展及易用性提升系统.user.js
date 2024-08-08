@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.8
+// @version           0.1.9
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -52,6 +52,10 @@
 ## 版本 0.1.8
 ### 2024-08-02
 - 优化功能：优化了“关于”菜单的显示内容。
+
+## 版本 0.1.9
+### 2024-08-08
+- 修复BUG：针对observeTableChanges，监控表格的函数，新增了#fltNos的前提，来确实是不是在长指令的界面。
 
 */
 
@@ -1855,6 +1859,10 @@ nav.flex .transition-all {
                 });
             }
         }
+
+        // 新增一个判断，是不是在AVJ的界面
+        const fltNosWrapper = document.querySelector("#fltNos");
+        if (!fltNosWrapper) return;
 
         const formElement = document.querySelector("form.ant-form.ant-form-horizontal");
         if (formElement) {
