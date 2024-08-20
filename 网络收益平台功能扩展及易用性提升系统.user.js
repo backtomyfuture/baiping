@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.11
+// @version           0.1.12
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -68,6 +68,10 @@
 - 新增功能：修改tooltipObserverForAllData，新增了getLowestPrice函数，获取最低价格;
 - 优化功能：优化了fetchAllData的参数，增加了初始日期和截止日期，减少对系统的压力；
 
+## 版本 0.1.12
+### 2024-08-20
+- 优化功能：getLowestPrice的逻辑，匹配的时候要对应targetDate；
+- 新增功能：新增initIndices，在航班调整页面初始化的时候，设置不同元素的index；
 
 */
 
@@ -107,6 +111,7 @@
     let currentDateFlightElement = null;
     let currentPriceElement = null;
     let PriceList = null;
+    let globalIndices = null;
 
     const $ = (Selector, el) => (el || document).querySelector(Selector);
     const $$ = (Selector, el) => (el || document).querySelectorAll(Selector);
@@ -1256,14 +1261,16 @@ nav.flex .transition-all {
                 return isWithinDate && isWithinDcp && isWithinDow && matchesFltNo && matchesCabinType;
             });
 
-            console.log("Applicable Entries:", applicableEntries);
+            console.log("满足条件的价差列表:", applicableEntries);
 
             // Step 2: Map applicableEntries to flight numbers and price diffs, considering cabin type
             applicableEntries.forEach(entry => {
                 if (entry.bigCabin === cabinType) {
                     entry.compFltNo.split(',').forEach(fltNo => {
-                        const flight = flightData.find(f => f.flightNumber === fltNo);
+                        const flight = flightData.find(f => f.flightNumber === fltNo && f.date.getTime() === targetDate.getTime());
                         if (flight) {
+                            console.log(`Searching for flight ${fltNo} on ${targetDate}:`, flight);
+                            console.log(`中间计算过程${fltNo}的价差: ${entry.priceDiffStd}`);
                             let calculatedPrice;
                             if (cabinType === '经济舱' && flight.economicPrice) {
                                 calculatedPrice = flight.economicPrice + entry.priceDiffStd;
@@ -1279,7 +1286,7 @@ nav.flex .transition-all {
                 }
             });
 
-            console.log("Lowest Prices:", lowestPrices);
+            console.log("经过计算后的最低价格:", lowestPrices);
 
             // Step 3: Find the minimum price from the list of calculated lowest prices
             if (lowestPrices.length > 0) {
@@ -1493,6 +1500,81 @@ nav.flex .transition-all {
                     cells.forEach(cell => setupHoverListeners(cell));
                 }
             });
+        });
+    }
+
+    function initIndices() {
+
+        const MAX_RETRIES = 5;
+        const RETRY_DELAY = 600; // 1秒
+
+        function getIndices() {
+            const headerRow = document.querySelector('.art-table .art-table-header');
+            if (!headerRow) return null;
+
+            const headerCells = headerRow.querySelectorAll('.art-table-header-cell');
+            let dateFlightIndex = -1;
+            let economicPriceIndex = -1;
+            let businessPriceIndex = -1;
+
+            headerCells.forEach((cell, index) => {
+                const cellText = cell.textContent.trim();
+                if (cellText.includes('航班号')) {
+                    dateFlightIndex = index;
+                } else if (cellText.includes('最低经济舱价格')) {
+                    economicPriceIndex = index;
+                } else if (cellText.includes('最低公务舱价格')) {
+                    businessPriceIndex = index;
+                }
+            });
+
+            return {
+                dateFlightIndex_origin: dateFlightIndex,
+                economicPriceIndex_origin: economicPriceIndex,
+                businessPriceIndex_origin: businessPriceIndex
+            };
+        }
+
+        // 新增：验证索引是否有效
+        function areIndicesValid(indices) {
+            return indices &&
+                indices.dateFlightIndex_origin !== -1 &&
+                indices.economicPriceIndex_origin !== -1 &&
+                indices.businessPriceIndex_origin !== -1;
+        }
+
+        // 带防抖和重试的 getIndices
+        const debouncedGetIndicesWithRetry = debounce((retryCount = 0) => {
+            const indices = getIndices();
+            if (areIndicesValid(indices)) {
+                globalIndices = indices;
+                console.log('Updated globalIndices:', globalIndices);
+                observer.disconnect(); // 成功获取索引后断开观察
+            } else if (retryCount < MAX_RETRIES) {
+                console.log(`Retrying to get indices... (${retryCount + 1}/${MAX_RETRIES})`);
+                setTimeout(() => debouncedGetIndicesWithRetry(retryCount + 1), RETRY_DELAY);
+            } else {
+                console.error('Failed to get valid indices after maximum retries');
+                observer.disconnect(); // 达到最大重试次数后断开观察
+            }
+        }, 300); // 300ms 的防抖时间
+
+        // 创建 MutationObserver
+        const observer = new MutationObserver((mutations) => {
+            for (let mutation of mutations) {
+                if (mutation.type === 'childList') {
+                    const refreshElement = document.querySelector('#refresh');
+                    if (refreshElement) {
+                        debouncedGetIndicesWithRetry();
+                        break;
+                    }
+                }
+            }
+        });
+        // 开始观察
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
         });
     }
 
@@ -2358,6 +2440,9 @@ nav.flex .transition-all {
 
     if (gv("k_batchavjlong", true) === true) {
         HookLongInstruction();
+    }
+    if (gv("k_priceDisplay", true) === true) {
+        initIndices();
     }
 
 
