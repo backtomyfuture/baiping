@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.12
+// @version           0.1.13
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -72,6 +72,10 @@
 ### 2024-08-20
 - 优化功能：getLowestPrice的逻辑，匹配的时候要对应targetDate；
 - 新增功能：新增initIndices，在航班调整页面初始化的时候，设置不同元素的index；
+
+## 版本 0.1.13
+### 2024-08-20
+- 优化功能：部分代码未更新，导致异常，重新将代码同步到最新；
 
 */
 
@@ -1371,9 +1375,6 @@ nav.flex .transition-all {
 
     // 获取元素id
     function elementObserverForAllData(mutations) {
-        let dateFlightIndex_origin = 1;
-        let economicPriceIndex_origin = 11;
-        let businessPriceIndex_origin = 12;
 
         function setupHoverListeners(node) {
 
@@ -1390,24 +1391,29 @@ nav.flex .transition-all {
                         const isFirstCellSpecial = cells[0].classList.contains('first');
 
                         // 根据第一个 cell 的类决定日期航班信息的索引
-                        const dateFlightIndex = isFirstCellSpecial ? dateFlightIndex_origin+1 : dateFlightIndex_origin;
+                        const dateFlightIndex = isFirstCellSpecial ? dateFlightIndex_origin : dateFlightIndex_origin-1;
 
                         // 根据第一个 cell 的类决定经济舱和公务舱最低价格的索引
-                        const economicPriceIndex = isFirstCellSpecial ? economicPriceIndex_origin+1 : economicPriceIndex_origin;
-                        const businessPriceIndex = isFirstCellSpecial ? businessPriceIndex_origin+1 : businessPriceIndex_origin;
+                        const economicPriceIndex = isFirstCellSpecial ? economicPriceIndex_origin : economicPriceIndex_origin-1;
+                        const businessPriceIndex = isFirstCellSpecial ? businessPriceIndex_origin : businessPriceIndex_origin-1;
+
+                        //console.log("元素index", dateFlightIndex, economicPriceIndex, businessPriceIndex);
 
                         // 检查当前鼠标悬停的元素是否为经济舱或公务舱的最低价格
                         if (cells.indexOf(parentCell) === economicPriceIndex) {
                             PriceList = getPricesList(target, economicPriceIndex_origin);
                             currentDateFlightElement = cells[dateFlightIndex].querySelector('[id^="data-"]');
                             currentPriceElement = target;
+                            //console.log("PriceList", PriceList);
                         } else if (cells.indexOf(parentCell) === businessPriceIndex) {
                             PriceList = getPricesList(target, businessPriceIndex_origin);
                             currentDateFlightElement = cells[dateFlightIndex].querySelector('[id^="data-"]');
                             currentPriceElement = target;
+                            //console.log("PriceList", PriceList);
                         } else if (cells.indexOf(parentCell) === dateFlightIndex) {
                             if (target.id && target.id.startsWith('data-')) {
                                 currentDateFlightElement = target;
+                                //console.log("currentDateFlightElement", currentDateFlightElement);
                             }
                         }
                     }
@@ -1443,9 +1449,11 @@ nav.flex .transition-all {
                     const isFirstCellSpecial = cells[0].classList.contains('first');
 
                     // 根据第一个 cell 的类决定日期航班信息的索引
-                    const dateFlightIndex = isFirstCellSpecial ? 2 : 1;
-                    const economicPriceIndex = isFirstCellSpecial ? 12 : 11;
-                    const businessPriceIndex = isFirstCellSpecial ? 13 : 12;
+                    const dateFlightIndex = isFirstCellSpecial ? dateFlightIndex_origin : dateFlightIndex_origin-1;
+
+                    // 根据第一个 cell 的类决定经济舱和公务舱最低价格的索引
+                    const economicPriceIndex = isFirstCellSpecial ? economicPriceIndex_origin : economicPriceIndex_origin-1;
+                    const businessPriceIndex = isFirstCellSpecial ? businessPriceIndex_origin : businessPriceIndex_origin-1;
 
                     const dateFlightCell = cells[dateFlightIndex];
 
@@ -1487,9 +1495,16 @@ nav.flex .transition-all {
                 return flightData;
             }
 
+            if (!globalIndices) return;
+            let { dateFlightIndex_origin, economicPriceIndex_origin, businessPriceIndex_origin } = globalIndices;
+
             node.removeEventListener('mouseover', onElementHover);
             node.addEventListener('mouseover', onElementHover);
         }
+
+        if (!document.querySelector('#refresh')) return;
+
+        //console.log('班调整页面，启动监控');
         mutations.forEach(mutation => {
             mutation.addedNodes.forEach(node => {
                 if (node.nodeType === 1) {
