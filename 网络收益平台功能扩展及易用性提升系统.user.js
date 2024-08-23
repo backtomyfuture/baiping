@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.14
+// @version           0.1.16
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -81,21 +81,26 @@
 ### 2024-08-21
 - 优化功能：新增了抓取价差时，将PVG对应到SHA；
 
+## 版本 0.1.15
+### 2024-08-22
+- 优化功能：新增globalFetchedData、globalAdditionalData全局变量，取代sessionStorage中存入和读取的操作，提高性能；
+- 优化功能：tooltipObserverForAllData从sessionstorage中读取userinfo的操作，使用了getUserInfo来替代；
+- 优化功能：updateCellValue中salesPrice的定义做了更新，提高安全性；
+- 优化功能: 初始化功能放到window.load里边；
+
+## 版本 0.1.16
+### 2024-08-22
+- 优化功能：去掉了全局的data，在sessionStorage中新增cabinPricePolicyStorage，存储舱位价格数据；
+- 新增功能：新增updateInitialPrices，在打开RO界面时候，可以显示已经调整过的价格；
+- 优化功能：addDoubleClickHandler和makeCellEditable，现在双击以后只能编辑价格部分，不能编辑舱位，同时颜色标识为红色；
+
+
 */
 
 (function() {
     'use strict';
 
     var global = {};
-    // 全局存储对象
-    var dataStorage = {
-        initialValues: {
-            firstCell: '',
-            secondCell: '',
-            tabPane: ''
-        },
-        updates: [] // { carrier, origin, destination, flight, cabin, salesPrice, startDate, endDate }
-    };
 
     function getUserInfo() {
         if (cachedUserInfo === null) { // 确保只在第一次调用时读取localStorage
@@ -120,6 +125,8 @@
     let currentPriceElement = null;
     let PriceList = null;
     let globalIndices = null;
+    let globalFetchedData = null;
+    let globalAdditionalData = null;
 
     const $ = (Selector, el) => (el || document).querySelector(Selector);
     const $$ = (Selector, el) => (el || document).querySelectorAll(Selector);
@@ -856,25 +863,72 @@ nav.flex .transition-all {
     // 功能 2：添加双击处理程序、添加批量提交按钮
     function enhanceBatchProcessing() {
 
+        let initialValues = {
+            firstCell: '',
+            secondCell: '',
+            tabPane: ''
+        };
+
+        // 辅助函数：保存数据到sessionStorage
+        function saveToSessionStorage(key, value) {
+            sessionStorage.setItem(key, JSON.stringify(value));
+        }
+
+        // 辅助函数：从sessionStorage获取数据
+        function getFromSessionStorage(key, defaultValue = null) {
+            const storedValue = sessionStorage.getItem(key);
+            return storedValue ? JSON.parse(storedValue) : defaultValue;
+        }
+
+        // 初始化或获取舱位价格政策存储
+        function initializeOrGetCabinPricePolicyStorage() {
+            return getFromSessionStorage('cabinPricePolicyStorage', {});
+        }
+
+        // 更新舱位价格政策
+        function updateCabinPricePolicy(flightNumber, date, segment, cabin, newPrice) {
+            const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
+            const segmentCode = segment.substring(0, 6);
+
+            if (!cabinPricePolicyStorage[segmentCode]) {
+                cabinPricePolicyStorage[segmentCode] = {};
+            }
+            if (!cabinPricePolicyStorage[segmentCode][flightNumber]) {
+                cabinPricePolicyStorage[segmentCode][flightNumber] = {};
+            }
+            if (!cabinPricePolicyStorage[segmentCode][flightNumber][date]) {
+                cabinPricePolicyStorage[segmentCode][flightNumber][date] = {};
+            }
+
+            cabinPricePolicyStorage[segmentCode][flightNumber][date][cabin] = newPrice;
+
+            saveToSessionStorage('cabinPricePolicyStorage', cabinPricePolicyStorage);
+        }
+
+        // 获取特定航班的舱位价格政策
+        function getCabinPricePolicy(flightNumber, date, segment) {
+            const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
+            const segmentCode = segment.substring(0, 6);
+            return cabinPricePolicyStorage[segmentCode]?.[flightNumber]?.[date] || null;
+        }
+
+        // 清空舱位价格政策存储
+        function clearCabinPricePolicyStorage() {
+            saveToSessionStorage('cabinPricePolicyStorage', {});
+        }
+
         function fetchInitialCellValues() {
-
             const targetElement = $('#cabin-control-id .ant-table-tbody');
-            if (!targetElement || targetElement.dataset.doubleClickAdded) return;
+            if (!targetElement || targetElement.dataset.initialValuesFetched) return;
 
-            targetElement.dataset.doubleClickAdded = 'true';
+            targetElement.dataset.initialValuesFetched = 'true';
 
             const tableBody = $('.ant-spin-container .ant-table-content .ant-table-tbody');
             if (tableBody) {
                 const cells = tableBody.querySelectorAll('.ant-table-row.ant-table-row-level-0 .ant-table-cell');
                 if (cells.length >= 2) {
-                    const [firstCell, secondCell] = cells;
-                    const initialValues = {
-                        firstCell: firstCell.textContent.trim(),
-                        secondCell: secondCell.textContent.trim()
-                    };
-                    console.log('第一个单元格的内容:', initialValues.firstCell);
-                    console.log('第二个单元格的内容:', initialValues.secondCell);
-                    dataStorage.initialValues = initialValues;
+                    initialValues.firstCell = cells[0].textContent.trim();
+                    initialValues.secondCell = cells[1].textContent.trim();
                 }
             }
 
@@ -882,9 +936,7 @@ nav.flex .transition-all {
             tabPanes.forEach(tabPane => {
                 const parentDiv = tabPane.closest('div[role="tab"]');
                 if (parentDiv && parentDiv.getAttribute('aria-disabled') === 'true') {
-                    const tabPaneContent = tabPane.textContent.trim();
-                    console.log('符合条件的TabPane的内容:', tabPaneContent);
-                    dataStorage.initialValues.tabPane = tabPaneContent;
+                    initialValues.tabPane = tabPane.textContent.trim();
                 }
             });
         }
@@ -894,9 +946,7 @@ nav.flex .transition-all {
             if (!targetModal) return;
 
             const container = targetModal.querySelector('.ant-row[style*="justify-content: flex-end;"]');
-            if (!container) return;
-
-            if (container.querySelector('.batch-add-button')) return;
+            if (!container || container.querySelector('.batch-add-button')) return;
 
             const batchButton = document.createElement('button');
             batchButton.type = 'button';
@@ -911,9 +961,6 @@ nav.flex .transition-all {
                     const inputEvent = new Event('input', { bubbles: true });
                     nativeInputValueSetter.call(applyReasonTextarea, '跟进CA、CZ、MU');
                     applyReasonTextarea.dispatchEvent(inputEvent);
-                    console.log('已经设置输入框的默认文本');
-                } else {
-                    console.error('未找到指定的<textarea>');
                 }
 
                 const tableBody = targetModal.querySelector('.ant-table-tbody');
@@ -922,63 +969,70 @@ nav.flex .transition-all {
                     return;
                 }
 
-                const placeholder = tableBody.querySelector('.ant-table-placeholder');
-                if (placeholder) {
-                    placeholder.remove();
-                }
+                const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
+                let totalUpdates = 0;
 
-                const updates = dataStorage.updates;
-                if (updates.length === 0) {
-                    console.warn('dataStorage 中没有存储的数据');
-                    return;
-                }
+                // 只有当有数据需要更新时才点击第一行的 checkbox
+                if (Object.keys(cabinPricePolicyStorage).length > 0) {
+                    const firstRowCheckbox = tableBody.querySelector('.ant-table-row.ant-table-row-level-0 .ant-table-cell.ant-table-selection-column input[type="checkbox"]');
+                    if (firstRowCheckbox) {
+                        firstRowCheckbox.click();
+                    }
 
-                const firstRowCheckbox = tableBody.querySelector('.ant-table-row.ant-table-row-level-0 .ant-table-cell.ant-table-selection-column input[type="checkbox"]');
-                if (!firstRowCheckbox) {
-                    console.error('未找到表格的第一行');
-                    return;
-                }
-
-                firstRowCheckbox.click();
-
-                const container = targetModal.querySelector('.ant-row[style*="justify-content: flex-end;"]');
-                if (!container) {
-                    console.error('未找到按钮的容器');
-                    return;
-                }
-                const copyAddButton = container.querySelector('button.ant-btn.ant-btn-primary:first-child');
-                if (!copyAddButton) {
-                    console.error('未找到“复制添加”按钮');
-                    return;
-                }
-
-                for (const update of updates) {
-                    copyAddButton.click();
-                    await new Promise(resolve => setTimeout(resolve, 100));
-
-                    const newRow = tableBody.querySelector('.ant-table-row.ant-table-row-level-0:last-child');
-                    const cells = newRow.querySelectorAll('.ant-table-cell');
-                    console.log("始发地的值", update.origin)
-                    await updateCell(cells[3], update.origin);
-                    await updateCell(cells[4], update.destination);
-                    await updateCell(cells[5], update.flight);
-                    await updateCell(cells[7], update.cabin);
-                    await updateCell(cells[8], update.salesPrice);
-                    await updateCell(cells[9], update.startDate);
-                    await updateCell(cells[10], update.endDate);
-
-                    const newRowCheckbox = newRow.querySelector('.ant-table-cell.ant-table-selection-column input[type="checkbox"]');
-                    if (newRowCheckbox) {
-                        newRowCheckbox.checked = false;
-                        newRowCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+                    for (const segment in cabinPricePolicyStorage) {
+                        for (const flightNumber in cabinPricePolicyStorage[segment]) {
+                            for (const date in cabinPricePolicyStorage[segment][flightNumber]) {
+                                for (const cabin in cabinPricePolicyStorage[segment][flightNumber][date]) {
+                                    const price = cabinPricePolicyStorage[segment][flightNumber][date][cabin];
+                                    await addNewRow(tableBody, {
+                                        segment,
+                                        flightNumber,
+                                        date,
+                                        cabin,
+                                        price
+                                    });
+                                    totalUpdates++;
+                                }
+                            }
+                        }
                     }
                 }
 
-                console.log(`添加了 ${updates.length} 行到表格中`);
-                dataStorage.updates = [];
+                console.log(`添加了 ${totalUpdates} 个舱位价格更新到表格中`);
+
+                // 清空 cabinPricePolicyStorage
+                clearCabinPricePolicyStorage();
             });
 
             container.appendChild(batchButton);
+        }
+
+        async function addNewRow(tableBody, data) {
+            const copyAddButton = tableBody.closest('.ant-modal-content').querySelector('button.ant-btn.ant-btn-primary:first-child');
+            if (!copyAddButton) {
+                console.error('未找到"复制添加"按钮');
+                return;
+            }
+
+            copyAddButton.click();
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            const newRow = tableBody.querySelector('.ant-table-row.ant-table-row-level-0:last-child');
+            const cells = newRow.querySelectorAll('.ant-table-cell');
+
+            await updateCell(cells[3], data.segment.substring(0, 3));
+            await updateCell(cells[4], data.segment.substring(3, 6));
+            await updateCell(cells[5], data.flightNumber);
+            await updateCell(cells[7], data.cabin);
+            await updateCell(cells[8], data.price.toString());
+            await updateCell(cells[9], data.date);
+            await updateCell(cells[10], data.date);
+
+            const newRowCheckbox = newRow.querySelector('.ant-table-cell.ant-table-selection-column input[type="checkbox"]');
+            if (newRowCheckbox) {
+                newRowCheckbox.checked = false;
+                newRowCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+            }
         }
 
         async function updateCell(cell, newValue) {
@@ -1010,7 +1064,6 @@ nav.flex .transition-all {
             const rows = targetElement.querySelectorAll('.ant-table-row.ant-table-row-level-0');
             for (const row of rows) {
                 const firstCell = row.querySelector('.ant-table-cell:nth-child(1)');
-                // 检查是否已经绑定了双击事件，如果是，则终止循环
                 if (firstCell && firstCell.dataset.doubleClickBound) break;
 
                 const seventhCell = row.querySelector('.ant-table-cell:nth-child(7)');
@@ -1021,17 +1074,18 @@ nav.flex .transition-all {
                     firstCell.addEventListener('dblclick', function() {
                         makeCellEditable(firstCell);
                     });
-                    console.log('[双击监控] 绑定双击事件至单元格');
                 }
-            };
+            }
         }
 
         function makeCellEditable(cell) {
             const currentText = cell.textContent.trim();
             cell.dataset.oldValue = currentText;
+            const [cabin, price] = extractCabinAndPrice(currentText);
+
             const input = document.createElement('input');
             input.type = 'text';
-            input.value = currentText;
+            input.value = price || '';
             input.style.width = "100%";
             cell.innerHTML = '';
             cell.appendChild(input);
@@ -1039,10 +1093,11 @@ nav.flex .transition-all {
 
             input.addEventListener('blur', function() {
                 const newValue = input.value.trim();
-                if (newValue !== currentText) {
-                    updateCellValue(cell, newValue);
+                if (newValue !== (price || '')) {
+                    updateCellValue(cell, cabin, newValue);
+                } else {
+                    cell.textContent = currentText;
                 }
-                cell.textContent = newValue;
             });
             input.addEventListener('keydown', function(event) {
                 if (event.key === "Enter") {
@@ -1051,31 +1106,62 @@ nav.flex .transition-all {
             });
         }
 
-        function updateCellValue(cell, newValue) {
+        function extractCabinAndPrice(text) {
+            const match = text.match(/^([A-Z])(\d+)?$/);
+            return match ? [match[1], match[2] || ''] : [text, ''];
+        }
+
+        function updateCellValue(cell, cabin, newPrice) {
             const oldValue = cell.dataset.oldValue || '';
-            const tabPaneValue = dataStorage.initialValues.tabPane;
-            const firstCellValue = dataStorage.initialValues.firstCell;
-            const secondCellValue = dataStorage.initialValues.secondCell;
-            const formattedDate = secondCellValue.replace(/-/g, '/');
+            const flightNumber = initialValues.firstCell;
+            const date = initialValues.secondCell.replace(/-/g, '/');
+            const segment = initialValues.tabPane.substring(0, 6);
 
-            // 提取和存储指定格式的值
-            const updateRecord = {
-                carrier: firstCellValue.substring(0, 2), // 承运人
-                origin: tabPaneValue.substring(0, 3), // 始发地
-                destination: tabPaneValue.substring(3, 6), // 目的地
-                flight: firstCellValue, // 航班
-                cabin: oldValue, // 舱位
-                salesPrice: newValue.replace(/\D/g, ''), // 销售价格，仅取数字部分
-                startDate: formattedDate, // 航班开始日期
-                endDate: formattedDate // 航班结束日期
-            };
+            const price = parseInt(newPrice, 10) || 0;
 
-            console.log(`[数据更新] 更新记录:`, updateRecord);
-            dataStorage.updates.push(updateRecord);
-            cell.textContent = newValue; // 更新单元格文本
+            updateCabinPricePolicy(flightNumber, date, segment, cabin, price);
+
+            const newCellContent = cabin + (price ? price.toString() : '');
+            cell.textContent = newCellContent;
+            cell.style.color = 'red'; // 标记已修改的价格
+        }
+
+        function updateInitialPrices() {
+            const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
+
+            const targetElement = $('#cabin-control-id .ant-table-tbody');
+            if (!targetElement) {
+                return;
+            }
+
+            if (!initialValues.firstCell || !initialValues.secondCell || !initialValues.tabPane) return;
+
+            const flightNumber = initialValues.firstCell;
+            const date = initialValues.secondCell.replace(/-/g, '/');
+            const segment = initialValues.tabPane.substring(0, 6);
+
+            const priceData = cabinPricePolicyStorage[segment]?.[flightNumber]?.[date];
+
+            if (!priceData) {
+                console.log('未找到匹配的价格数据');
+                return;
+            }
+
+            const rows = $$('#cabin-control-id .ant-table-tbody .ant-table-row.ant-table-row-level-0');
+            rows.forEach(row => {
+                const cabinCell = row.querySelector('.ant-table-cell:nth-child(1)');
+                if (cabinCell) {
+                    const cabin = cabinCell.textContent.trim();
+                    if (priceData[cabin]) {
+                        cabinCell.textContent = cabin + priceData[cabin];
+                        cabinCell.style.color = 'red'; // 标记已修改的价格
+                    }
+                }
+            });
         }
 
         fetchInitialCellValues();
+        updateInitialPrices(); // 新增这一行
         addDoubleClickHandler();
         addBatchButton();
     }
@@ -1151,7 +1237,7 @@ nav.flex .transition-all {
 
     async function fetchAdditionalData(params, authorizationToken, origin, dest, startFltDate, endFltDate) {
         const url = `http://sfm.hnair.net/sfm-admin/im/autoimlog/list?limit=${params.limit}&jobId=${params.jobId}&origin=${encodeURIComponent(origin)}&dest=${encodeURIComponent(dest)}&status=${encodeURIComponent(params.status)}&dataSource=${encodeURIComponent(params.dataSource)}&startFltDate=${encodeURIComponent(startFltDate)}&endFltDate=${encodeURIComponent(endFltDate)}&startCmdTime=${encodeURIComponent(params.startCmdTime)}&endCmdTime=${encodeURIComponent(params.endCmdTime)}&isCmd=${encodeURIComponent(params.isCmd)}&jobWarningType=${encodeURIComponent(params.jobWarningType)}`;
-        console.log("Request URL:", url); // 打印URL以进行调试
+        //console.log("Request URL:", url); // 打印URL以进行调试
         const headers = {
             'Accept': 'application/json, text/plain, */*',
             'X-Authorization': authorizationToken
@@ -1311,9 +1397,11 @@ nav.flex .transition-all {
         function updateTooltipContent(tooltipElement, targetElement) {
             if (tooltipElement.getAttribute('data-modified')) return;
 
-            const fetchedData = JSON.parse(sessionStorage.getItem('fetchedData') || 'null');
-            const additionalData = JSON.parse(sessionStorage.getItem('additionalData') || 'null');
-            const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
+            //const fetchedData = JSON.parse(sessionStorage.getItem('fetchedData') || 'null');
+            //const additionalData = JSON.parse(sessionStorage.getItem('additionalData') || 'null');
+            const fetchedData = globalFetchedData;
+            const additionalData = globalAdditionalData;
+            const userInfo = getUserInfo();
             const { airCompony } = userInfo;
 
             const idParts = targetElement.id.split('-');
@@ -1603,7 +1691,7 @@ nav.flex .transition-all {
         // Handle specific element found and fetch data
         async function handleSpecificElementFound() {
             try {
-                const userInfo = JSON.parse(localStorage.getItem('userInfo'));
+                const userInfo = getUserInfo();
                 const { token: authorizationToken, airCompony } = userInfo;
                 const xsrfToken = (document.cookie.match(/XSRF-TOKEN=([^;]+)/) || [])[1] || '';
 
@@ -1618,7 +1706,8 @@ nav.flex .transition-all {
                 const endFltDate = $('input[placeholder="结束日期"]').value
 
                 const allData = await fetchAllData(depCityCode, arrCityCode,startFltDate,endFltDate, airCompony, authorizationToken, xsrfToken);
-                sessionStorage.setItem('fetchedData', JSON.stringify(allData));
+                //sessionStorage.setItem('fetchedData', JSON.stringify(allData));
+                globalFetchedData = allData;
                 console.log('已经获取了新的价差数据', allData);
 
             } catch (error) {
@@ -1720,7 +1809,8 @@ nav.flex .transition-all {
                 const params = setCommandTimes();
 
                 const additionalData = await fetchAdditionalData(params, authorizationToken, depCityCode, arrCityCode, startFltDate, endFltDate);
-                sessionStorage.setItem('additionalData', JSON.stringify(additionalData));
+                //sessionStorage.setItem('additionalData', JSON.stringify(additionalData));
+                globalAdditionalData = additionalData;
                 console.log('已经获取了历史航线平均价格数据:', additionalData);
 
             } catch (error) {
@@ -2421,8 +2511,18 @@ nav.flex .transition-all {
         unsafeWindow.XMLHttpRequest = XHRProxy;
     }
 
+    function loadDefautAction() {
+        if (gv("k_batchavjlong", true) === true) {
+            HookLongInstruction();
+        }
+        if (gv("k_priceDisplay", true) === true) {
+            initIndices();
+        }
+    }
+
     window.addEventListener('load', () => {
         loadKCG();
+        loadDefautAction();
     });
 
     const observer = new MutationObserver((mutations, obs) => {
@@ -2456,13 +2556,5 @@ nav.flex .transition-all {
     });
 
     observer.observe(document.body, { childList: true, subtree: true });
-
-    if (gv("k_batchavjlong", true) === true) {
-        HookLongInstruction();
-    }
-    if (gv("k_priceDisplay", true) === true) {
-        initIndices();
-    }
-
 
 })();
