@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.17
+// @version           0.1.18
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -99,6 +99,11 @@
 - 优化功能：舱位单元格输入非数字，提示错误；
 - 优化功能：提高了批量调舱的延时，到400ms和500ms；
 - 优化功能：将清空历史数据的触发按钮由批量添加改到了下一步；
+
+## 版本 0.1.18
+### 2024-08-26
+- 优化功能：在updateCabinPricePolicy的时候，增加了很多验证，来确保数据正确，如果数据不对，是用window.top.message来提示错误，同时不会保存；
+- 优化功能：减少了批量调舱的延时，到300ms；
 
 
 */
@@ -755,6 +760,7 @@ nav.flex .transition-all {
 
     // 功能 1：移动按钮、移除按钮、添加自定义右键菜单
     function enhanceUI() {
+
         function moveButton() {
 
             const refreshButton = $('#refresh');
@@ -893,6 +899,37 @@ nav.flex .transition-all {
 
         // 更新舱位价格政策
         function updateCabinPricePolicy(flightNumber, date, segment, cabin, newPrice) {
+
+            // 验证 flightNumber（6位）
+            if (!flightNumber || !/^[A-Z0-9]{6}$/.test(flightNumber)) {
+                window.top.message.error("更新舱位价格政策失败：航班号必须为6位字母或数字");
+                return;
+            }
+
+            // 验证 date（格式为 "YYYY/MM/DD"）
+            if (!date || !/^\d{4}\/\d{2}\/\d{2}$/.test(date)) {
+                window.top.message.error("更新舱位价格政策失败：日期格式必须为 YYYY/MM/DD");
+                return;
+            }
+
+            // 验证 segment（大于6位）
+            if (!segment || segment.length < 6) {
+                window.top.message.error("更新舱位价格政策失败：航段必须大于6位");
+                return;
+            }
+
+            // 验证 cabin（单个字母）
+            if (!cabin || !/^[A-Z]$/.test(cabin)) {
+                window.top.message.error("更新舱位价格政策失败：舱位必须为单个大写字母");
+                return;
+            }
+
+            // 验证 newPrice（整数）
+            if (typeof newPrice !== 'number' || !Number.isInteger(newPrice) || newPrice < 0) {
+                window.top.message.error("更新舱位价格政策失败：价格必须为非负整数");
+                return;
+            }
+
             const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
             const segmentCode = segment.substring(0, 6);
 
@@ -945,6 +982,10 @@ nav.flex .transition-all {
                     initialValues.tabPane = tabPane.textContent.trim();
                 }
             });
+
+            if (!initialValues.firstCell || !initialValues.secondCell || !initialValues.tabPane) {
+                window.top.message.error("获取初始值失败：部分数据缺失");
+            }
         }
 
         function addBatchButton() {
@@ -1054,7 +1095,7 @@ nav.flex .transition-all {
             }
 
             copyAddButton.click();
-            await new Promise(resolve => setTimeout(resolve, 400));
+            await new Promise(resolve => setTimeout(resolve, 300));
 
             const newRow = tableBody.querySelector('.ant-table-row.ant-table-row-level-0:last-child');
             const cells = newRow.querySelectorAll('.ant-table-cell');
@@ -1084,7 +1125,7 @@ nav.flex .transition-all {
             const dblClickEvent = new MouseEvent('dblclick', { bubbles: true });
             editableDiv.dispatchEvent(dblClickEvent);
 
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 300));
 
             const input = cell.querySelector('input, textarea, [contenteditable="true"]');
             if (input) {
