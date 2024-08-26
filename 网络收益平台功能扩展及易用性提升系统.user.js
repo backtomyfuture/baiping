@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.16
+// @version           0.1.17
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -93,6 +93,12 @@
 - 优化功能：去掉了全局的data，在sessionStorage中新增cabinPricePolicyStorage，存储舱位价格数据；
 - 新增功能：新增updateInitialPrices，在打开RO界面时候，可以显示已经调整过的价格；
 - 优化功能：addDoubleClickHandler和makeCellEditable，现在双击以后只能编辑价格部分，不能编辑舱位，同时颜色标识为红色；
+
+## 版本 0.1.17
+### 2024-08-26
+- 优化功能：舱位单元格输入非数字，提示错误；
+- 优化功能：提高了批量调舱的延时，到400ms和500ms；
+- 优化功能：将清空历史数据的触发按钮由批量添加改到了下一步；
 
 
 */
@@ -971,6 +977,7 @@ nav.flex .transition-all {
 
                 const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
                 let totalUpdates = 0;
+                let failedUpdates = 0;
 
                 // 只有当有数据需要更新时才点击第一行的 checkbox
                 if (Object.keys(cabinPricePolicyStorage).length > 0) {
@@ -984,14 +991,19 @@ nav.flex .transition-all {
                             for (const date in cabinPricePolicyStorage[segment][flightNumber]) {
                                 for (const cabin in cabinPricePolicyStorage[segment][flightNumber][date]) {
                                     const price = cabinPricePolicyStorage[segment][flightNumber][date][cabin];
-                                    await addNewRow(tableBody, {
-                                        segment,
-                                        flightNumber,
-                                        date,
-                                        cabin,
-                                        price
-                                    });
-                                    totalUpdates++;
+                                    try {
+                                        await addNewRow(tableBody, {
+                                            segment,
+                                            flightNumber,
+                                            date,
+                                            cabin,
+                                            price
+                                        });
+                                        totalUpdates++;
+                                    } catch (error) {
+                                        console.error(`添加行失败: ${segment} ${flightNumber} ${date} ${cabin}`, error);
+                                        failedUpdates++;
+                                    }
                                 }
                             }
                         }
@@ -1000,11 +1012,38 @@ nav.flex .transition-all {
 
                 console.log(`添加了 ${totalUpdates} 个舱位价格更新到表格中`);
 
-                // 清空 cabinPricePolicyStorage
-                clearCabinPricePolicyStorage();
             });
 
+            addNextStepButtonListener();
+
             container.appendChild(batchButton);
+        }
+
+        function addNextStepButtonListener() {
+            const modalContent = document.querySelector('.ant-modal-content');
+            if (!modalContent) {
+                console.log('未找到模态框内容');
+                return;
+            }
+
+            const buttons = modalContent.querySelectorAll('button.ant-btn.ant-btn-primary');
+            let nextStepButton = null;
+
+            for (const button of buttons) {
+                if (button.textContent.trim() === '下一步') {
+                    nextStepButton = button;
+                    break;
+                }
+            }
+
+            if (nextStepButton) {
+                nextStepButton.addEventListener('click', () => {
+                    clearCabinPricePolicyStorage();
+                    console.log('已清空 cabinPricePolicyStorage');
+                });
+            } else {
+                console.log('未找到"下一步"按钮');
+            }
         }
 
         async function addNewRow(tableBody, data) {
@@ -1015,7 +1054,7 @@ nav.flex .transition-all {
             }
 
             copyAddButton.click();
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 400));
 
             const newRow = tableBody.querySelector('.ant-table-row.ant-table-row-level-0:last-child');
             const cells = newRow.querySelectorAll('.ant-table-cell');
@@ -1045,7 +1084,7 @@ nav.flex .transition-all {
             const dblClickEvent = new MouseEvent('dblclick', { bubbles: true });
             editableDiv.dispatchEvent(dblClickEvent);
 
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             const input = cell.querySelector('input, textarea, [contenteditable="true"]');
             if (input) {
@@ -1117,11 +1156,18 @@ nav.flex .transition-all {
             const date = initialValues.secondCell.replace(/-/g, '/');
             const segment = initialValues.tabPane.substring(0, 6);
 
-            const price = parseInt(newPrice, 10) || 0;
+            // 验证输入是否为有效的数字
+            if (!/^\d+$/.test(newPrice)) {
+                window.top.message.error("请输入正确的价格");
+                cell.textContent = oldValue; // 恢复原始值
+                return;
+            }
+
+            const price = parseInt(newPrice, 10);
 
             updateCabinPricePolicy(flightNumber, date, segment, cabin, price);
 
-            const newCellContent = cabin + (price ? price.toString() : '');
+            const newCellContent = cabin + price.toString();
             cell.textContent = newCellContent;
             cell.style.color = 'red'; // 标记已修改的价格
         }
