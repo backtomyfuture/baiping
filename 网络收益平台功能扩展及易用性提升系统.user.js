@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.18
+// @version           0.1.19
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://github.com/backtomyfuture/baiping/
@@ -105,6 +105,9 @@
 - 优化功能：在updateCabinPricePolicy的时候，增加了很多验证，来确保数据正确，如果数据不对，是用window.top.message来提示错误，同时不会保存；
 - 优化功能：减少了批量调舱的延时，到300ms；
 
+## 版本 0.1.19
+### 2024-08-27
+- 优化功能：新增isTooltipContentNotValid，判断修改tooltip内容排除sql自动化执行的框；
 
 */
 
@@ -1530,6 +1533,10 @@ nav.flex .transition-all {
             tooltipElement.setAttribute('data-modified', 'true');
         }
 
+        function isTooltipContentNotValid(tooltipElement) {
+            const content = tooltipElement.textContent.trim();
+            return content.includes('自动任务') || content.includes('SQL') || content.includes('执行时间');
+        }
 
         mutations.forEach(mutation => {
             if (mutation.type === 'childList') {
@@ -1543,8 +1550,10 @@ nav.flex .transition-all {
                     if (tooltipElement && !tooltipElement.classList.contains('ant-tooltip-hidden')) {
                         const tooltipInner = tooltipElement.querySelector('.ant-tooltip-inner');
                         if (tooltipInner && !tooltipInner.getAttribute('data-modified')) {
-                            updateTooltipContent(tooltipInner, currentDateFlightElement);
-                            tooltipInner.setAttribute('data-modified', 'true'); // 标记为已修改
+                            if (!isTooltipContentNotValid(tooltipInner)) {
+                                updateTooltipContent(tooltipInner, currentDateFlightElement);
+                                tooltipInner.setAttribute('data-modified', 'true');
+                            }
                         }
                     }
                 });
