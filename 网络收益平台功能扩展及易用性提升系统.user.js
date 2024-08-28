@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.19
+// @version           0.1.20
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
-// @supportURL        https://github.com/backtomyfuture/baiping/
+// @supportURL        https://nas.tianjin-air.com/drive/d/s/zscI7k3iDWokFcbaIlEUI4zVZ9HVXGH4/AmpcRaV_3yQsaeeJL9owo_6YS9lI1sud-Es2AYV0QoAs
 // @match             http://sfm.hnair.net/*
 // @connect           github.com
 // @connect           greasyfork.org
@@ -108,6 +108,10 @@
 ## 版本 0.1.19
 ### 2024-08-27
 - 优化功能：新增isTooltipContentNotValid，判断修改tooltip内容排除sql自动化执行的框；
+
+## 版本 0.1.20
+### 2024-08-28
+- 新增功能：新增用户手册；
 
 */
 
@@ -481,22 +485,40 @@
         };
 
         $('#nmenuid_ab').onclick = function() {
-            //window.open(GM_info.script.namespace, '_blank');
-            // 示例调用 ndialog 函数来显示“关于”信息
             const aboutTitle = '关于';
             const scriptVersion = GM_info.script.version;
             const aboutContent = `
-<strong>应用名称：</strong>网络收益平台功能扩展平台<br>
-<strong>版本：</strong>${scriptVersion}<br>
-<strong>描述：</strong>这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。<br>
-<strong>版权：</strong>© 2024 天津航空信息技术部<br>
-<strong>联系方式：</strong><a href='mailto:q-fu@tianjin-air.com'>q-fu@tianjin-air.com</a>
-`;
+    <div class="about-content">
+        <p><strong>应用名称：</strong>网络收益平台功能扩展及易用性提升系统</p>
+        <p><strong>版本：</strong>${scriptVersion}</p>
+        <p><strong>描述：</strong>这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、同期价格展示、界面优化、批量调舱、批量长指令、快捷跳转等，后续会有更多新功能，敬请期待。</p>
+        <p><strong>用户手册：</strong><a href="${GM_info.script.supportURL}" target="_blank" class="link">点击查看用户手册</a></p>
+        <p><strong>版权：</strong>© 2024 天津航空信息技术部</p>
+        <p><strong>联系方式：</strong><a href='mailto:q-fu@tianjin-air.com' class="link">q-fu@tianjin-air.com</a></p>
+    </div>
+    `;
+            // 添加样式
+            GM_addStyle(`
+        .about-content {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #333;
+        }
+        .about-content p {
+            margin-bottom: 10px;
+        }
+        .about-content .link {
+            color: #FF4D4F; /* 修改为红色 */
+            text-decoration: none;
+        }
+        .about-content .link:hover {
+            text-decoration: underline;
+        }
+    `);
 
             ndialog(aboutTitle, aboutContent, '关闭');
-
-
         };
+
     };
 
     function setUserOptions() {
