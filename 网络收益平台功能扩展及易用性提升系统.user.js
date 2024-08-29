@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.20
+// @version           0.1.21
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
-// @supportURL        https://nas.tianjin-air.com/drive/d/s/zscI7k3iDWokFcbaIlEUI4zVZ9HVXGH4/AmpcRaV_3yQsaeeJL9owo_6YS9lI1sud-Es2AYV0QoAs
+// @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
 // @match             http://sfm.hnair.net/*
 // @connect           github.com
 // @connect           greasyfork.org
@@ -113,6 +113,11 @@
 ### 2024-08-28
 - 新增功能：新增用户手册；
 
+## 版本 0.1.21
+### 2024-08-29
+- 优化功能：将initialValues放到全局变量，以解决刷新页面后，不会重新获取initialValues导致报错的问题；
+
+
 */
 
 (function() {
@@ -136,6 +141,12 @@
             timeout = setTimeout(() => func.apply(this, args), wait);
         };
     }
+
+    let initialValues = {
+        firstCell: '',
+        secondCell: '',
+        tabPane: ''
+    };
 
     let cachedUserInfo = null;
     const requestCache = new Map();
@@ -899,12 +910,6 @@ nav.flex .transition-all {
 
     // 功能 2：添加双击处理程序、添加批量提交按钮
     function enhanceBatchProcessing() {
-
-        let initialValues = {
-            firstCell: '',
-            secondCell: '',
-            tabPane: ''
-        };
 
         // 辅助函数：保存数据到sessionStorage
         function saveToSessionStorage(key, value) {
