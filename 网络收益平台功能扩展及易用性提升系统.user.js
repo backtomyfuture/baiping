@@ -2546,17 +2546,6 @@ nav.flex .transition-all {
                     return acc;
                 }, []);
 
-
-                const segmentsInfo1 = [
-                    //{ seg: 'tsncsx', fltNos: ["GS6427", "GS7819"] },
-                    //{ seg: 'tsnhrb', fltNos: ["GS7583", "GS7919"] },
-                    { seg: 'tsnxiy', fltNos: ["GS7584", "GS7650", "GS7899", "GS7903", "GS7987", "GS7901"] },
-                    //{ seg: 'tsnxmn', fltNos: ["GS7817", "GS7889"] },
-                    { seg: 'tsnkwe', fltNos: ["GS7835", "GS7907", "GS7901"] },
-                    //{ seg: 'tsndlc', fltNos: ["GS6414", "GS7821"] },
-
-                ];
-
                 console.log("构造的 segmentsInfo:", segmentsInfo);
 
                 try {
