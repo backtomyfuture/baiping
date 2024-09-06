@@ -117,6 +117,12 @@
 ### 2024-08-29
 - 优化功能：将initialValues放到全局变量，以解决刷新页面后，不会重新获取initialValues导致报错的问题；
 
+## 版本 0.1.22
+### 2024-09-02
+- 优化功能：批量调舱功能，标记已经调整过的舱位、价格，增加了粗体显示；
+- 优化功能：优化了批量调舱右击悬浮菜单的样式，以便和左侧即将做的排除航班右击菜单一致；
+- 优化功能：重构了右击下拉菜单的方式，增加了全局变量currentMenuId，来避免不同页面右击下拉菜单导致的冲突；
+
 
 */
 
@@ -156,6 +162,7 @@
     let globalIndices = null;
     let globalFetchedData = null;
     let globalAdditionalData = null;
+    let currentMenuId = null;
 
     const $ = (Selector, el) => (el || document).querySelector(Selector);
     const $$ = (Selector, el) => (el || document).querySelectorAll(Selector);
@@ -796,12 +803,9 @@ nav.flex .transition-all {
 
     // 功能 1：移动按钮、移除按钮、添加自定义右键菜单
     function enhanceUI() {
-
         function moveButton() {
-
             const refreshButton = $('#refresh');
             const container = $('.ant-col-9 .ant-row.ant-form-item-row .ant-form-item-control-input .ant-space');
-            // 检查元素是否存在，并尝试移动
             if (refreshButton && container && refreshButton.parentNode !== container) {
                 container.appendChild(refreshButton);
             }
@@ -820,55 +824,58 @@ nav.flex .transition-all {
             const targetElement = $('#cabin-control-id');
             if (!targetElement || targetElement.dataset.customMenuAdded) return;
 
-            targetElement.dataset.customMenuAdded = 'true'; // 避免重复绑定
+            targetElement.dataset.customMenuAdded = 'true';
 
             targetElement.addEventListener('contextmenu', (event) => {
                 event.preventDefault();
-                removeCustomMenu();
+                removeAllCustomMenus();
 
-                const menu = createContextMenu(event.pageX, event.pageY);
+                const menuId = 'cabin-control-menu-' + Date.now();
+                currentMenuId = menuId;
+                const menu = createContextMenu(event.pageX, event.pageY, menuId);
                 document.body.appendChild(menu);
-
-                setTimeout(() => {
-                    document.addEventListener('click', () => menu.remove(), { once: true });
-                }, 0);
             });
         }
 
-        function createContextMenu(x, y) {
+        function createContextMenu(x, y, menuId) {
             const style = document.createElement('style');
             document.head.appendChild(style);
             style.textContent = `
             .custom-context-menu {
                 font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-                font-size: 14px;
+                font-size: 13px;
                 background-color: #ffffff;
-                border: 1px solid #dcdcdc;
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+                border: 1px solid #e0e0e0;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
                 border-radius: 4px;
-                overflow: hidden;
+                overflow: visible;
                 box-sizing: border-box;
-                min-width: 100px;
+                min-width: 140px;
                 position: absolute;
                 left: ${x}px;
                 top: ${y}px;
                 z-index: 10000;
                 cursor: default;
+                padding: 4px 0;
             }
             .custom-context-menu-item {
-                padding: 8px 15px;
+                padding: 6px 16px 6px 24px;
                 cursor: pointer;
                 color: #333333;
                 text-align: left;
+                position: relative;
+                display: flex;
+                align-items: center;
+                white-space: nowrap;
             }
             .custom-context-menu-item:hover {
-                background-color: #f5f5f5;
-                color: #000000;
+                background-color: #f0f0f0;
             }
-        `;
+            `;
 
             const menu = document.createElement('div');
             menu.className = 'custom-context-menu';
+            menu.id = menuId;
 
             const sendItem = document.createElement('div');
             sendItem.className = 'custom-context-menu-item';
@@ -878,7 +885,7 @@ nav.flex .transition-all {
                 if (button) {
                     button.click();
                 }
-                menu.remove();
+                removeAllCustomMenus();
             });
 
             const priceAdjustmentItem = document.createElement('div');
@@ -889,7 +896,7 @@ nav.flex .transition-all {
                 if (button) {
                     button.click();
                 }
-                menu.remove();
+                removeAllCustomMenus();
             });
 
             menu.appendChild(sendItem);
@@ -898,14 +905,25 @@ nav.flex .transition-all {
             return menu;
         }
 
-        function removeCustomMenu() {
-            const existingMenu = $('div[style*="position: absolute"]');
-            if (existingMenu) existingMenu.remove();
+        function removeAllCustomMenus() {
+            const menus = document.querySelectorAll('.custom-context-menu');
+            menus.forEach(menu => menu.remove());
+            currentMenuId = null;
         }
 
         moveButton();
         removeButton();
         addCustomContextMenu();
+
+        // 添加全局点击事件监听器
+        document.addEventListener('click', (e) => {
+            if (currentMenuId) {
+                const currentMenu = document.getElementById(currentMenuId);
+                if (currentMenu && !currentMenu.contains(e.target)) {
+                    removeAllCustomMenus();
+                }
+            }
+        });
     }
 
     // 功能 2：添加双击处理程序、添加批量提交按钮
@@ -1241,6 +1259,7 @@ nav.flex .transition-all {
             const newCellContent = cabin + price.toString();
             cell.textContent = newCellContent;
             cell.style.color = 'red'; // 标记已修改的价格
+            cell.style.fontWeight = 'bold'; // 加粗文本
         }
 
         function updateInitialPrices() {
@@ -1272,6 +1291,7 @@ nav.flex .transition-all {
                     if (priceData[cabin]) {
                         cabinCell.textContent = cabin + priceData[cabin];
                         cabinCell.style.color = 'red'; // 标记已修改的价格
+                        cabinCell.style.fontWeight = 'bold'; // 加粗文本
                     }
                 }
             });
