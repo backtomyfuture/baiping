@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.22
+// @version           0.1.23
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -122,6 +122,13 @@
 - 优化功能：批量调舱功能，标记已经调整过的舱位、价格，增加了粗体显示；
 - 优化功能：优化了批量调舱右击悬浮菜单的样式，以便和左侧即将做的排除航班右击菜单一致；
 - 优化功能：重构了右击下拉菜单的方式，增加了全局变量currentMenuId，来避免不同页面右击下拉菜单导致的冲突；
+
+## 版本 0.1.23
+### 2024-09-13
+- 新增功能：新增了航班调整页面左侧面板的右击下拉菜单，同时统一了右侧RO面板的下拉菜单，使用统一的函数来作用；
+- 新增功能：新增了系统级的antDesignOperations，用来操作页面控件的输入，暂时包括日期、下拉单选菜单、input以及fillTextArea；
+- 新增功能：新增了快捷航班排除功能，可以将航班信息带入到航班排除页面；
+- 优化功能：将右击下拉菜单的功能从“页面优化”大功能拆出来；
 
 
 */
@@ -290,6 +297,115 @@
         }
     };
 
+    // antdesign专用的输入，包括日期、下拉选择菜单、input和text输入
+    const antDesignOperations = {
+        fillDatePicker(selector, date) {
+            return new Promise((resolve, reject) => {
+                const datePickerInput = $(selector).closest('.ant-picker-input');
+                if (!datePickerInput) {
+                    reject(new Error(`未找到日期选择器元素: ${selector}`));
+                    return;
+                }
+
+                const input = $(selector);
+                if (!input) {
+                    reject(new Error('未找到日期输入框'));
+                    return;
+                }
+
+                datePickerInput.click();
+
+                setTimeout(() => {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeInputValueSetter.call(input, date);
+
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new KeyboardEvent('keydown', {
+                        bubbles: true,
+                        cancelable: true,
+                        key: 'Enter',
+                        keyCode: 13
+                    }));
+
+                    resolve();
+                }, 600);
+            });
+        },
+
+        selectDropdownOption(selector, optionValue) {
+            return new Promise((resolve, reject) => {
+                const select = $(selector).closest('.ant-select-selector');
+                if (!select) {
+                    reject(new Error(`未找到选择框元素: ${selector}`));
+                    return;
+                }
+
+                const mouseDownEvent = new MouseEvent('mousedown', {
+                    bubbles: true,
+                    cancelable: true
+                });
+
+                select.dispatchEvent(mouseDownEvent);
+
+                setTimeout(() => {
+                    const option = document.querySelector(`div.ant-select-item.ant-select-item-option[title="${optionValue}"]`);
+                    if (option) {
+                        const clickEvent = new MouseEvent('click', {
+                            bubbles: true,
+                            cancelable: true
+                        });
+
+                        option.dispatchEvent(clickEvent);
+                        resolve();
+                    } else {
+                        reject(new Error(`未找到选项: ${optionValue}`));
+                    }
+                }, 500);
+            });
+        },
+
+        fillInput(selector, value) {
+            return new Promise((resolve, reject) => {
+                const input = $(selector);
+                if (!input) {
+                    reject(new Error(`未找到元素: ${selector}`));
+                    return;
+                }
+
+                requestAnimationFrame(() => {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeInputValueSetter.call(input, value);
+
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+                    resolve();
+                });
+            });
+        },
+
+        fillTextArea(selector, value) {
+            return new Promise((resolve, reject) => {
+                const TextArea = $(selector);
+                if (!TextArea) {
+                    reject(new Error(`未找到元素: ${selector}`));
+                    return;
+                }
+
+                requestAnimationFrame(() => {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                    nativeInputValueSetter.call(TextArea, value);
+
+                    TextArea.dispatchEvent(new Event('input', { bubbles: true }));
+                    TextArea.dispatchEvent(new Event('change', { bubbles: true }));
+
+                    resolve();
+                });
+            });
+        },
+
+    };
+
     const formatDate = function(d) {
         return (new Date(d)).toLocaleString();
     };
@@ -430,6 +546,7 @@
     <li id=nmenuid_sd>${("同期数据显示")}</li>
     <li id=nmenuid_bc>${("批量调舱")}</li>
     <li id=nmenuid_av>${("批量AVJ长指令")}</li>
+    <li id=nmenuid_qn>${("快捷跳转")}</li>
     <li id=nmenuid_io>${("界面优化")}</li>
     <li id=nmenuid_cu>${("检查更新")}</li>
     <li id=nmenuid_ab>${("关于")}</li>
@@ -443,6 +560,8 @@
         $('#nmenuid_bc').appendChild(ncheckbox());
         $('#nmenuid_io').appendChild(ncheckbox());
         $('#nmenuid_av').appendChild(ncheckbox());
+        $('#nmenuid_qn').appendChild(ncheckbox());
+
 
         // 保留或添加需要的功能项的事件处理函数
         $('#nmenuid_af').onclick = function() {
@@ -484,6 +603,15 @@
                 sv("k_interfaceOptimization", false);
             } else {
                 sv("k_interfaceOptimization", true);
+            }
+            $('.checkbutton', this).classList.toggle('checked');
+        };
+
+        $('#nmenuid_qn').onclick = function() {
+            if ($('.checkbutton', this).classList.contains('checked')) {
+                sv("k_quickNavigation", false);
+            } else {
+                sv("k_quickNavigation", true);
             }
             $('.checkbutton', this).classList.toggle('checked');
         };
@@ -559,6 +687,10 @@
         if (gv("k_batchavjlong", true) === true) {
             $('#nmenuid_av .checkbutton').classList.add('checked');
         }
+        if (gv("k_quickNavigation", true) === true) {
+            $('#nmenuid_qn .checkbutton').classList.add('checked');
+        }
+
 
     }
 
@@ -801,7 +933,7 @@ nav.flex .transition-all {
         });
     };
 
-    // 功能 1：移动按钮、移除按钮、添加自定义右键菜单
+    // 功能 1：移动按钮、移除按钮
     function enhanceUI() {
         function moveButton() {
             const refreshButton = $('#refresh');
@@ -820,66 +952,124 @@ nav.flex .transition-all {
             });
         }
 
+        moveButton();
+        removeButton();
+
+    }
+
+    // 功能 2：新增右击下拉菜单功能
+    function enhanceUIWithContextMenu() {
+
         function addCustomContextMenu() {
-            const targetElement = $('#cabin-control-id');
-            if (!targetElement || targetElement.dataset.customMenuAdded) return;
+            const refreshElement = $('#refresh');
+            const leftTargetElement = $('#cabin-control-id');
+            const rightTargetElement = $('.art-table');
 
-            targetElement.dataset.customMenuAdded = 'true';
+            if (refreshElement && leftTargetElement && !leftTargetElement.dataset.customMenuAdded) {
+                setupContextMenu(leftTargetElement, 'left');
+            }
 
-            targetElement.addEventListener('contextmenu', (event) => {
+            if (refreshElement && rightTargetElement && !rightTargetElement.dataset.customMenuAdded) {
+                setupContextMenu(rightTargetElement, 'right');
+            }
+        }
+
+        function setupContextMenu(element, side) {
+            element.dataset.customMenuAdded = 'true';
+
+            element.addEventListener('contextmenu', (event) => {
                 event.preventDefault();
                 removeAllCustomMenus();
 
-                const menuId = 'cabin-control-menu-' + Date.now();
+                if (side === 'right') {
+                    const currentFlightInfo = getFlightInfo(event);
+                    if (currentFlightInfo !== null) {
+                        sessionStorage.setItem('currentFlightInfo', JSON.stringify(currentFlightInfo));
+                    } else return;
+                }
+
+                const menuId = `${side}-menu-${Date.now()}`;
                 currentMenuId = menuId;
-                const menu = createContextMenu(event.pageX, event.pageY, menuId);
+                const menu = createContextMenu(event.pageX, event.pageY, menuId, side);
                 document.body.appendChild(menu);
+
+
             });
         }
 
-        function createContextMenu(x, y, menuId) {
-            const style = document.createElement('style');
-            document.head.appendChild(style);
-            style.textContent = `
-            .custom-context-menu {
-                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-                font-size: 13px;
-                background-color: #ffffff;
-                border: 1px solid #e0e0e0;
-                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-                border-radius: 4px;
-                overflow: visible;
-                box-sizing: border-box;
-                min-width: 140px;
-                position: absolute;
-                left: ${x}px;
-                top: ${y}px;
-                z-index: 10000;
-                cursor: default;
-                padding: 4px 0;
-            }
-            .custom-context-menu-item {
-                padding: 6px 16px 6px 24px;
-                cursor: pointer;
-                color: #333333;
-                text-align: left;
-                position: relative;
-                display: flex;
-                align-items: center;
-                white-space: nowrap;
-            }
-            .custom-context-menu-item:hover {
-                background-color: #f0f0f0;
-            }
-            `;
+        function createContextMenu(x, y, menuId, side) {
+            addContextMenuStyles();
 
             const menu = document.createElement('div');
             menu.className = 'custom-context-menu';
             menu.id = menuId;
+            menu.style.left = `${x}px`;
+            menu.style.top = `${y}px`;
 
-            const sendItem = document.createElement('div');
-            sendItem.className = 'custom-context-menu-item';
-            sendItem.textContent = '发送指令';
+            if (side === 'left') {
+                addLeftMenuItems(menu);
+            } else {
+                addRightMenuItems(menu);
+            }
+
+            return menu;
+        }
+
+        function addContextMenuStyles() {
+            if (!document.getElementById('context-menu-styles')) {
+                const style = document.createElement('style');
+                style.id = 'context-menu-styles';
+                style.textContent = `
+                .custom-context-menu, .custom-context-submenu {
+                    font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+                    font-size: 13px;
+                    background-color: #ffffff;
+                    border: 1px solid #e0e0e0;
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                    border-radius: 4px;
+                    overflow: visible;
+                    box-sizing: border-box;
+                    min-width: 140px;
+                    position: absolute;
+                    z-index: 10000;
+                    cursor: default;
+                    padding: 4px 0;
+                    display: none;
+                }
+                .custom-context-menu {
+                    display: block;
+                }
+                .custom-context-submenu {
+                    left: 100%;
+                    top: -4px;
+                }
+                .custom-context-menu-item {
+                    padding: 6px 16px 6px 24px;
+                    cursor: pointer;
+                    color: #333333;
+                    text-align: left;
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    white-space: nowrap;
+                }
+                .custom-context-menu-item:hover {
+                    background-color: #f0f0f0;
+                }
+                .custom-context-menu-item.has-submenu::after {
+                    content: '▶';
+                    position: absolute;
+                    right: 8px;
+                    font-size: 9px;
+                    color: #999;
+                }
+            `;
+                document.head.appendChild(style);
+            }
+        }
+
+        function addLeftMenuItems(menu) {
+            const sendItem = createMenuItem('发送指令');
             sendItem.addEventListener('click', () => {
                 const button = Array.from($$('button.ant-btn.ant-btn-primary')).find(btn => btn.textContent.includes('发送指令'));
                 if (button) {
@@ -888,9 +1078,7 @@ nav.flex .transition-all {
                 removeAllCustomMenus();
             });
 
-            const priceAdjustmentItem = document.createElement('div');
-            priceAdjustmentItem.className = 'custom-context-menu-item';
-            priceAdjustmentItem.textContent = '发起调价';
+            const priceAdjustmentItem = createMenuItem('发起调价');
             priceAdjustmentItem.addEventListener('click', () => {
                 const button = Array.from($$('button.ant-btn.ant-btn-primary')).find(btn => btn.textContent.includes('发起调价'));
                 if (button) {
@@ -901,8 +1089,95 @@ nav.flex .transition-all {
 
             menu.appendChild(sendItem);
             menu.appendChild(priceAdjustmentItem);
+        }
 
-            return menu;
+        function addRightMenuItems(menu) {
+            const excludeFlightItem = createMenuItem('排除航班', true);
+            const moduleSubMenu = createSubmenu();
+            excludeFlightItem.appendChild(moduleSubMenu);
+
+            const menuData = JSON.parse(sessionStorage.getItem('menuData') || 'null');
+
+            if (menuData) {
+                menuData.forEach(moduleData => {
+                    const moduleItem = createMenuItem(moduleData.module, true);
+                    const jobSubMenu = createSubmenu();
+
+                    moduleData.jobList.forEach(job => {
+                        const jobItem = createMenuItem(job);
+                        jobItem.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            console.log(`排除航班 - ${moduleData.module} - ${job}`);
+                            simulateClick('排除航班');
+                            sessionStorage.setItem('currentModule', JSON.stringify(moduleData.module));
+                            sessionStorage.setItem('currentJob', JSON.stringify(job));
+                            removeAllCustomMenus();
+                        });
+                        jobSubMenu.appendChild(jobItem);
+                    });
+
+                    moduleItem.appendChild(jobSubMenu);
+                    moduleSubMenu.appendChild(moduleItem);
+                });
+            }
+
+            menu.appendChild(excludeFlightItem);
+            setupSubmenus(menu);
+        }
+
+        function createMenuItem(text, hasSubmenu = false) {
+            const item = document.createElement('div');
+            item.className = `custom-context-menu-item${hasSubmenu ? ' has-submenu' : ''}`;
+            item.textContent = text;
+            return item;
+        }
+
+        function createSubmenu() {
+            const submenu = document.createElement('div');
+            submenu.className = 'custom-context-submenu';
+            return submenu;
+        }
+
+        function setupSubmenus(menu) {
+            const items = menu.querySelectorAll('.custom-context-menu-item.has-submenu');
+            items.forEach(item => {
+                const submenu = item.querySelector('.custom-context-submenu');
+                if (submenu) {
+                    setupMouseEvents(item, submenu);
+                }
+            });
+        }
+
+        function setupMouseEvents(item, submenu) {
+            let timeout;
+            item.addEventListener('mouseover', () => {
+                clearTimeout(timeout);
+                Array.from(item.parentNode.children).forEach(child => {
+                    if (child !== item && child.querySelector('.custom-context-submenu')) {
+                        hideSubmenu(child.querySelector('.custom-context-submenu'));
+                    }
+                });
+                showSubmenu(submenu);
+            });
+            item.addEventListener('mouseout', (e) => {
+                if (!submenu.contains(e.relatedTarget)) {
+                    timeout = setTimeout(() => hideSubmenu(submenu), 300);
+                }
+            });
+            submenu.addEventListener('mouseover', () => clearTimeout(timeout));
+            submenu.addEventListener('mouseout', (e) => {
+                if (!item.contains(e.relatedTarget)) {
+                    timeout = setTimeout(() => hideSubmenu(submenu), 300);
+                }
+            });
+        }
+
+        function showSubmenu(submenu) {
+            submenu.style.display = 'block';
+        }
+
+        function hideSubmenu(submenu) {
+            submenu.style.display = 'none';
         }
 
         function removeAllCustomMenus() {
@@ -911,8 +1186,93 @@ nav.flex .transition-all {
             currentMenuId = null;
         }
 
-        moveButton();
-        removeButton();
+        function getFlightInfo(event) {
+            const target = event.target;
+            const row = target.closest('.art-table-row');
+            if (!row) return null;
+
+            const cells = row.querySelectorAll('.art-table-cell');
+            if (cells.length < 3) return null;
+
+            const isFirstCellSpecial = cells[0].classList.contains('first');
+
+            let { dateFlightIndex_origin } = globalIndices;
+
+            const dateFlightIndex = isFirstCellSpecial ? dateFlightIndex_origin : dateFlightIndex_origin - 1;
+
+            const dateFlightCell = cells[dateFlightIndex];
+            const dateFlightElement = dateFlightCell.querySelector('[id^="data-"]');
+            if (!dateFlightElement) return null;
+
+            const idParts = dateFlightElement.id.split('-');
+            const date = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
+            const flightNumber = idParts[4];
+
+            const filteredFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || 'null');
+
+            // 首先检查 filteredFlightList 是否为 null 或不是数组
+            if (!filteredFlightList || !Array.isArray(filteredFlightList)) {
+                console.log('filteredFlightList is null or not an array');
+                return null;
+            }
+
+            const userInfo = getUserInfo();
+            const { airCompony } = userInfo;
+
+            const matchedFlight = filteredFlightList.find(flight => {
+                if (airCompony === "HU") {
+                    return flight.fltDate.split(' ')[0] === date && flight.fltNo === flightNumber && (flight.fltNo.includes("HU") || flight.fltNo.includes("CN"));
+                } else {
+                    return flight.fltDate.split(' ')[0] === date && flight.fltNo === flightNumber && flight.fltNo.includes(airCompony);
+                }
+            });
+
+            if (!matchedFlight) return null;
+
+            const airRoute = matchedFlight.airRoute.replace(/-/g, '');
+
+            return {
+                date: date,
+                flightNumber: flightNumber,
+                segment: airRoute,
+                origin: matchedFlight.origin,
+                dest: matchedFlight.dest
+            };
+        }
+
+        function simulateClick(item) {
+            const topDocument = window.top.document;
+            const moduleMenu = topDocument.querySelector(`div[data-menu-id="menu-id-/PriceDiff"]`);
+            if (moduleMenu) {
+                simulateHover(moduleMenu);
+
+                setTimeout(() => {
+                    const jobItem = topDocument.querySelector(`li[data-menu-id="menu-id-/PriceDiff/ExcludeFlight"]`);
+                    if (jobItem) {
+                        jobItem.click();
+                    } else {
+                        console.log(`排除航班选项未找到`);
+                    }
+                }, 200);
+            } else {
+                console.log(`价差菜单未找到`);
+            }
+        }
+
+        function simulateHover(element) {
+            const events = ['mouseenter', 'mouseover', 'mousemove'];
+            events.forEach(eventType => {
+                const event = new MouseEvent(eventType, {
+                    view: window.top,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: element.getBoundingClientRect().left,
+                    clientY: element.getBoundingClientRect().top
+                });
+                element.dispatchEvent(event);
+            });
+        }
+
         addCustomContextMenu();
 
         // 添加全局点击事件监听器
@@ -925,6 +1285,272 @@ nav.flex .transition-all {
             }
         });
     }
+
+    // 功能 3：快捷跳转（暂时只有航班排除）
+    function quickNavigation(mutations) {
+
+        function handleRefreshClick(event) {
+            //const refreshButton = document.querySelector('#refresh');
+            const refreshButton = event.target.closest('#refresh');
+            if (refreshButton) {
+                getMenuData();
+                getLeaderList();
+                sessionStorage.removeItem('filteredFlightList');
+            }
+        }
+
+        function handleFormSubmit(event) {
+
+            console.log('触发了sumit事件');
+            // 执行getMenuData函数
+            getMenuData();
+            getLeaderList();
+            sessionStorage.removeItem('filteredFlightList');
+        }
+
+        function handleFormKeydown(event) {
+            if (event.key === 'Enter') {
+                console.log('触发了Enter事件');
+                //event.preventDefault(); // 防止默认的表单提交行为
+                getMenuData();
+                getLeaderList();
+                sessionStorage.removeItem('filteredFlightList');
+                //this.submit();
+            }
+        }
+
+        async function getMenuData() {
+            try {
+                const userInfo = getUserInfo();
+                const { token: authorizationToken } = userInfo;
+
+                const response = await fetch("http://sfm.hnair.net/sfm-admin/priceCheck/exclude/modelList", {
+                    "headers": {
+                        "accept": "application/json, text/plain, */*",
+                        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+                        "request-starttime": Date.now().toString(),
+                        "x-authorization": authorizationToken
+                    },
+                    "referrer": "http://sfm.hnair.net/?onlyContent=1&t=0.8830882693673767",
+                    "referrerPolicy": "strict-origin-when-cross-origin",
+                    "body": null,
+                    "method": "GET",
+                    "mode": "cors",
+                    "credentials": "include"
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const menuData = await response.json();
+                sessionStorage.setItem('menuData', JSON.stringify(menuData.obj));
+                console.log('已经获取了排除航班类型数据:', menuData.obj);
+            } catch (error) {
+                console.error('Error fetching menu data:', error);
+            }
+        }
+
+        async function getLeaderList() {
+            try {
+                const userInfo = getUserInfo();
+                const { token: authorizationToken } = userInfo;
+
+                const response = await fetch("http://sfm.hnair.net/sfm-admin/priceCheck/exclude/leaderList", {
+                    "headers": {
+                        "accept": "application/json, text/plain, */*",
+                        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+                        "request-starttime": Date.now().toString(),
+                        "x-authorization": authorizationToken
+                    },
+                    "referrer": "http://sfm.hnair.net/?onlyContent=1&t=0.7775500487471136",
+                    "referrerPolicy": "strict-origin-when-cross-origin",
+                    "body": null,
+                    "method": "GET",
+                    "mode": "cors",
+                    "credentials": "include"
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const leaderData = await response.json();
+                sessionStorage.setItem('leaderData', JSON.stringify(leaderData.obj));
+                console.log('已经获取了领导人列表数据:', leaderData.obj);
+                return leaderData.obj;
+            } catch (error) {
+                console.error('Error fetching leader list:', error);
+                return null;
+            }
+        }
+
+        function addRefreshButtonListener() {
+            const refreshButton = document.querySelector('#refresh');
+            if (refreshButton && !refreshButton.hasAttribute('data-listener-added')) {
+                refreshButton.addEventListener('click', handleRefreshClick);
+                refreshButton.setAttribute('data-listener-added', 'true');
+            }
+        }
+
+        function addFormSubmitListener() {
+            // 使用属性选择器来找到表单，而不是依赖于特定的id
+            const form = document.querySelector('form.ant-form.ant-form-inline.ant-form-middle.plane-adapt-form');
+            if (form && !form.hasAttribute('data-listener-added')) {
+                form.addEventListener('submit', handleFormSubmit);
+                form.setAttribute('data-listener-added', 'true');
+            }
+        }
+
+        function addFormKeydownListener() {
+            const form = document.querySelector('form.ant-form.ant-form-inline.ant-form-middle.plane-adapt-form');
+            if (form && !form.hasAttribute('data-keydown-listener-added')) {
+                form.addEventListener('keydown', handleFormKeydown);
+                form.setAttribute('data-keydown-listener-added', 'true');
+            }
+        }
+
+        mutations.forEach(mutation => {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        if (node.id === 'refresh' || node.querySelector('#refresh')) {
+                            addRefreshButtonListener();
+                            addFormSubmitListener();
+                            addFormKeydownListener();
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // 功能3 模块：表单填充
+    const FormFiller = {
+        isFillingForm: false,
+
+        async fillExcludeForm() {
+            if (this.isFillingForm) {
+                console.log('表单填充正在进行中，跳过本次调用');
+                return;
+            }
+
+            const reportNewButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
+            .find(btn => btn.textContent.includes('呈报新排除航班'));
+
+            const currentFlightInfo = JSON.parse(sessionStorage.getItem('currentFlightInfo') || 'null');
+            const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
+
+            if (!reportNewButton || !currentFlightInfo || !currentModule) return;
+
+            this.isFillingForm = true;
+            console.log('开始填充表单');
+
+            try {
+                await this.delay(1000);
+
+                reportNewButton.click();
+                console.log('已点击"呈报新排除航班"按钮');
+
+                await this.delay(400);
+                await this.autoFillbaic();
+
+                await this.delay(200);
+                const addNewButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
+                .find(btn => btn.textContent.includes('添加'));
+                if (addNewButton) addNewButton.click();
+
+                await this.delay(200);
+                await this.autoFillForms();
+
+                await this.delay(100);
+                const confirmButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
+                .find(btn => btn.textContent.includes('确'));
+                if (confirmButton) confirmButton.click();
+
+            } catch (error) {
+                console.error('填充表单过程中发生错误:', error);
+            } finally {
+                this.isFillingForm = false;
+                sessionStorage.removeItem('currentFlightInfo');
+                sessionStorage.removeItem('currentModule');
+                sessionStorage.removeItem('currentJob');
+                console.log('表单填充结束');
+            }
+        },
+
+        async autoFillbaic() {
+
+            function formatDate(dateString) {
+                const date = new Date(dateString);
+                return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+            }
+
+            try {
+                const currentFlightInfo = JSON.parse(sessionStorage.getItem('currentFlightInfo') || 'null');
+                const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
+                const currentJob = JSON.parse(sessionStorage.getItem('currentJob') || 'null');
+                //await antDesignOperations.selectDropdownOption('#basic_submitType', '时刻独立收舱');
+                const formattedDate = formatDate(currentFlightInfo.date);
+                const title = `${formattedDate}${currentFlightInfo.origin}${currentFlightInfo.dest}排除${currentModule}`;
+                await antDesignOperations.fillInput('#basic_flowInstanceName', title);
+                await antDesignOperations.fillTextArea('#basic_remark', '请领导审批');
+            } catch (error) {
+                console.error('自动填充基本信息失败:', error);
+            }
+        },
+
+        async autoFillForms() {
+            function calculateDCP(flightDate) {
+                const today = new Date();
+                const flight = new Date(flightDate);
+                const diffTime = Math.abs(flight - today);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                return diffDays;
+            }
+
+            const currentFlightInfo = JSON.parse(sessionStorage.getItem('currentFlightInfo') || 'null');
+            const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
+            const currentJob = JSON.parse(sessionStorage.getItem('currentJob') || 'null');
+            const leaderData = JSON.parse(sessionStorage.getItem('leaderData') || 'null');
+
+            if (!currentFlightInfo.flightNumber) {
+                console.error('currentFlightInfo 不存在或不完整');
+                return;
+            }
+
+            const airline = currentFlightInfo.flightNumber.substring(0, 2);
+
+            try {
+                await antDesignOperations.fillDatePicker('#fltDate', currentFlightInfo.date);
+                await antDesignOperations.fillDatePicker('input[placeholder="结束日期"]', currentFlightInfo.date);
+                await antDesignOperations.fillInput('#route', currentFlightInfo.segment);
+                await antDesignOperations.selectDropdownOption('#airline', airline);
+                await antDesignOperations.selectDropdownOption('#module', currentModule);
+                await antDesignOperations.selectDropdownOption('#jobName', currentJob);
+                await antDesignOperations.fillInput('#seg', currentFlightInfo.origin + currentFlightInfo.dest);
+                if (currentModule.includes('公务')) {
+                    await antDesignOperations.selectDropdownOption('#applicableCabin', '公务舱');
+                }else{
+                    await antDesignOperations.selectDropdownOption('#applicableCabin', '经济舱');
+                };
+                await antDesignOperations.fillInput('#fltNo', currentFlightInfo.flightNumber);
+                await antDesignOperations.fillInput('#startDcp', '0');
+                const dcp = calculateDCP(currentFlightInfo.date);
+                await antDesignOperations.fillInput('#endDcp', dcp.toString());
+                await antDesignOperations.selectDropdownOption('#approveLead', leaderData[0]);
+                const reason = "为了确保航班正常销售，特此申请暂时剔除自动化调整规则，以便根据实时市场情况灵活调整。";
+                await antDesignOperations.fillTextArea('#reason', reason);
+
+            } catch (error) {
+                console.error('自动填充表单失败:', error);
+            }
+        },
+
+        delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+    };
 
     // 功能 2：添加双击处理程序、添加批量提交按钮
     function enhanceBatchProcessing() {
@@ -2643,12 +3269,106 @@ nav.flex .transition-all {
         unsafeWindow.XMLHttpRequest = XHRProxy;
     }
 
+    function HookFlightControlList() {
+        function shouldInterceptRequest(url, method) {
+            return url &&
+                typeof url === 'string' &&
+                url.includes('sfm-admin/fltmanage/flightcontrol/list') &&
+                method === 'GET';
+        }
+
+        async function handleInterceptedRequest(xhr) {
+            console.log('拦截到航班控制列表请求');
+
+            return new Promise((resolve) => {
+                const originalOnLoad = xhr.onload;
+                xhr.onload = function() {
+                    if (this.status === 200) {
+                        const response = JSON.parse(this.responseText);
+                        if (response && response.obj && Array.isArray(response.obj.list)) {
+                            const userInfo = getUserInfo();
+                            const { airCompony } = userInfo;
+
+                            //const filteredList = response.obj.list.filter(flight => {
+                            //    if (airCompony === "HU") {
+                            //        return flight.fltNo.includes("HU") || flight.fltNo.includes("CN");
+                            //    } else {
+                            //        return flight.fltNo.includes(airCompony);
+                            //    }
+                            //});
+
+                            const filteredList = response.obj.list.map(flight => ({
+                                airRoute: flight.airRoute,
+                                airline: flight.airline,
+                                origin: flight.origin,
+                                dest: flight.dest,
+                                fltDate: flight.fltDate,
+                                fltNo: flight.fltNo,
+                                seg: flight.seg
+                            }));
+
+                            // 获取现有的累积列表
+                            let accumulatedFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || '[]');
+
+                            // 将新的过滤后的航班添加到累积列表中
+                            accumulatedFlightList = accumulatedFlightList.concat(filteredList);
+
+                            // 存储筛选后的数据到 sessionStorage
+                            sessionStorage.setItem('filteredFlightList', JSON.stringify(accumulatedFlightList));
+                            console.log('已将筛选后的航班数据存储到 sessionStorage');
+                        }
+                    }
+                    if (originalOnLoad) {
+                        originalOnLoad.apply(this, arguments);
+                    }
+                    resolve();
+                };
+            });
+        }
+
+        const XHRProxy = new Proxy(XMLHttpRequest, {
+            construct(target, args) {
+                const xhr = new target(...args);
+
+                const originalOpen = xhr.open;
+                xhr.open = function(...args) {
+                    this._method = args[0];
+                    this._url = args[1];
+                    return originalOpen.apply(this, args);
+                };
+
+                const originalSend = xhr.send;
+                xhr.send = async function(data) {
+                    if (shouldInterceptRequest(this._url, this._method)) {
+                        const originalOnReadyStateChange = this.onreadystatechange;
+                        this.onreadystatechange = async function() {
+                            if (this.readyState === 4) {
+                                await handleInterceptedRequest(this);
+                            }
+                            if (originalOnReadyStateChange) {
+                                originalOnReadyStateChange.apply(this, arguments);
+                            }
+                        };
+                    }
+                    return originalSend.apply(this, arguments);
+                };
+
+                return xhr;
+            }
+        });
+
+        unsafeWindow.XMLHttpRequest = XHRProxy;
+    }
+
     function loadDefautAction() {
         if (gv("k_batchavjlong", true) === true) {
             HookLongInstruction();
         }
         if (gv("k_priceDisplay", true) === true) {
             initIndices();
+        }
+        if (gv("k_quickNavigation", true) === true) {
+            HookFlightControlList();
         }
     }
 
@@ -2684,6 +3404,13 @@ nav.flex .transition-all {
                 batch_avj();
                 observeTableChanges();
             }
+
+            if (gv("k_quickNavigation", true) === true) {
+                enhanceUIWithContextMenu();
+                quickNavigation(mutations)
+                FormFiller.fillExcludeForm();
+            }
+
         }
     });
 
