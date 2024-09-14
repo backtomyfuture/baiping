@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           0.1.23
+// @version           0.1.24
 // @author            Fq
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -129,6 +129,11 @@
 - 新增功能：新增了系统级的antDesignOperations，用来操作页面控件的输入，暂时包括日期、下拉单选菜单、input以及fillTextArea；
 - 新增功能：新增了快捷航班排除功能，可以将航班信息带入到航班排除页面；
 - 优化功能：将右击下拉菜单的功能从“页面优化”大功能拆出来；
+
+## 版本 0.1.24
+### 2024-09-14
+- 优化功能：修复了快捷跳转的hook对原来批量avj hook的影响，两个功能合并为一个；
+- 优化功能：优化了日期输入框和下拉菜单输入框的模式，减少了延时；
 
 
 */
@@ -313,13 +318,40 @@
                     return;
                 }
 
-                datePickerInput.click();
+                // 模拟鼠标移入
+                datePickerInput.dispatchEvent(new MouseEvent('mouseenter', {
+                    bubbles: true,
+                    cancelable: true,
+                }));
+
+                // 模拟鼠标点击
+                datePickerInput.dispatchEvent(new MouseEvent('mousedown', {
+                    bubbles: true,
+                    cancelable: true,
+                }));
+
+                datePickerInput.dispatchEvent(new MouseEvent('mouseup', {
+                    bubbles: true,
+                    cancelable: true,
+                }));
+
+                datePickerInput.dispatchEvent(new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                }));
 
                 setTimeout(() => {
+                    // 设置输入值
                     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                     nativeInputValueSetter.call(input, date);
 
+                    // 触发输入事件
                     input.dispatchEvent(new Event('input', { bubbles: true }));
+
+                    // 触发变更事件
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+                    // 模拟按下回车键
                     input.dispatchEvent(new KeyboardEvent('keydown', {
                         bubbles: true,
                         cancelable: true,
@@ -327,8 +359,17 @@
                         keyCode: 13
                     }));
 
+                    // 模拟鼠标移出
+                    datePickerInput.dispatchEvent(new MouseEvent('mouseleave', {
+                        bubbles: true,
+                        cancelable: true,
+                    }));
+
+                    // 确保日期选择器面板关闭
+                    document.body.click();
+
                     resolve();
-                }, 600);
+                }, 300);
             });
         },
 
@@ -340,27 +381,71 @@
                     return;
                 }
 
-                const mouseDownEvent = new MouseEvent('mousedown', {
+                // 模拟鼠标移入
+                select.dispatchEvent(new MouseEvent('mouseenter', {
                     bubbles: true,
                     cancelable: true
-                });
+                }));
 
-                select.dispatchEvent(mouseDownEvent);
+                // 模拟鼠标点击以打开下拉菜单
+                select.dispatchEvent(new MouseEvent('mousedown', {
+                    bubbles: true,
+                    cancelable: true
+                }));
 
+                select.dispatchEvent(new MouseEvent('mouseup', {
+                    bubbles: true,
+                    cancelable: true
+                }));
+
+                select.dispatchEvent(new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true
+                }));
+
+                // 等待下拉菜单打开
                 setTimeout(() => {
                     const option = document.querySelector(`div.ant-select-item.ant-select-item-option[title="${optionValue}"]`);
                     if (option) {
-                        const clickEvent = new MouseEvent('click', {
+                        // 模拟鼠标移动到选项上
+                        option.dispatchEvent(new MouseEvent('mouseenter', {
                             bubbles: true,
                             cancelable: true
-                        });
+                        }));
 
-                        option.dispatchEvent(clickEvent);
+                        // 模拟点击选项
+                        option.dispatchEvent(new MouseEvent('mousedown', {
+                            bubbles: true,
+                            cancelable: true
+                        }));
+
+                        option.dispatchEvent(new MouseEvent('mouseup', {
+                            bubbles: true,
+                            cancelable: true
+                        }));
+
+                        option.dispatchEvent(new MouseEvent('click', {
+                            bubbles: true,
+                            cancelable: true
+                        }));
+
+                        // 触发 change 事件
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+
+                        // 模拟鼠标移出
+                        select.dispatchEvent(new MouseEvent('mouseleave', {
+                            bubbles: true,
+                            cancelable: true
+                        }));
+
+                        // 确保下拉菜单关闭
+                        document.body.click();
+
                         resolve();
                     } else {
                         reject(new Error(`未找到选项: ${optionValue}`));
                     }
-                }, 500);
+                }, 100);
             });
         },
 
@@ -3056,7 +3141,15 @@ nav.flex .transition-all {
         }
     }, 1000); // Debounce delay of 500 milliseconds
 
-    function HookLongInstruction() {
+    function HookXMLHttpRequest() {
+
+        function shouldInterceptLongInstructionRequest(url, method) {
+            return url && typeof url === 'string' && url.includes('sfm-admin/rtquery/longcmd/query') && method === 'POST';
+        }
+
+        function shouldInterceptFlightControlRequest(url, method) {
+            return url && typeof url === 'string' && url.includes('sfm-admin/fltmanage/flightcontrol/list') && method === 'GET';
+        }
 
         async function makeCustomFetch(details) {
             const userInfo = getUserInfo();
@@ -3161,11 +3254,7 @@ nav.flex .transition-all {
             };
         }
 
-        function shouldInterceptRequest(url, method) {
-            return url && typeof url === 'string' && url.includes('sfm-admin/rtquery/longcmd/query') && method === 'POST';
-        }
-
-        async function handleInterceptedRequest(xhr, data) {
+        async function handleLongInstructionRequest(xhr, data) {
             const requestBody = JSON.parse(data);
             if (requestBody.seg === "ALLSEG") {
                 console.log('特殊处理多段请求...');
@@ -3233,51 +3322,7 @@ nav.flex .transition-all {
             return false;
         }
 
-        const XHRProxy = new Proxy(XMLHttpRequest, {
-            construct(target, args) {
-                const xhr = new target(...args);
-
-                const originalOpen = xhr.open;
-                xhr.open = function(...args) {
-                    this._method = args[0];
-                    this._url = args[1];
-                    return originalOpen.apply(this, args);
-                };
-
-                const originalSend = xhr.send;
-                xhr.send = async function(data) {
-                    if (shouldInterceptRequest(this._url, this._method)) {
-                        const requestBody = JSON.parse(data);
-                        if (requestBody.seg === "ALLSEG") {
-                            try {
-                                const handled = await handleInterceptedRequest(this, data);
-                                if (handled) {
-                                    return;
-                                }
-                            } catch (error) {
-                                console.error('拦截请求处理时出错:', error);
-                            }
-                        }
-                    }
-                    return originalSend.apply(this, arguments);
-                };
-
-                return xhr;
-            }
-        });
-
-        unsafeWindow.XMLHttpRequest = XHRProxy;
-    }
-
-    function HookFlightControlList() {
-        function shouldInterceptRequest(url, method) {
-            return url &&
-                typeof url === 'string' &&
-                url.includes('sfm-admin/fltmanage/flightcontrol/list') &&
-                method === 'GET';
-        }
-
-        async function handleInterceptedRequest(xhr) {
+        async function handleFlightControlRequest(xhr) {
             console.log('拦截到航班控制列表请求');
 
             return new Promise((resolve) => {
@@ -3339,11 +3384,23 @@ nav.flex .transition-all {
 
                 const originalSend = xhr.send;
                 xhr.send = async function(data) {
-                    if (shouldInterceptRequest(this._url, this._method)) {
+                    if (shouldInterceptLongInstructionRequest(this._url, this._method)) {
+                        const requestBody = JSON.parse(data);
+                        if (requestBody.seg === "ALLSEG") {
+                            try {
+                                const handled = await handleLongInstructionRequest(this, data);
+                                if (handled) {
+                                    return;
+                                }
+                            } catch (error) {
+                                console.error('处理长指令请求时出错:', error);
+                            }
+                        }
+                    } else if (shouldInterceptFlightControlRequest(this._url, this._method)) {
                         const originalOnReadyStateChange = this.onreadystatechange;
                         this.onreadystatechange = async function() {
                             if (this.readyState === 4) {
-                                await handleInterceptedRequest(this);
+                                await handleFlightControlRequest(this);
                             }
                             if (originalOnReadyStateChange) {
                                 originalOnReadyStateChange.apply(this, arguments);
@@ -3362,14 +3419,14 @@ nav.flex .transition-all {
 
     function loadDefautAction() {
         if (gv("k_batchavjlong", true) === true) {
-            HookLongInstruction();
+            HookXMLHttpRequest();
         }
         if (gv("k_priceDisplay", true) === true) {
             initIndices();
         }
-        if (gv("k_quickNavigation", true) === true) {
-            HookFlightControlList();
-        }
+        //if (gv("k_quickNavigation", true) === true) {
+          //  HookFlightControlList();
+        //}
     }
 
     window.addEventListener('load', () => {
