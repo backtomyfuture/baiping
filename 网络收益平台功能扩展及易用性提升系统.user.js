@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.0
+// @version           1.0.1
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -143,6 +143,17 @@
 ### 2024-09-18
 - 新增功能：对整个版本进行重构，模块化整个代码结构；
 
+## 版本 1.0.1
+### 2024-09-18
+- 优化功能：重构了menuManager代码，精简函数，简化流程；
+- 优化功能：优化了longInstruction中关于should***Request的判断逻辑，添加了core.isFeatureEnabled；
+- 优化功能：将excludeFlight中的delay放到core中；
+- 优化功能：将batchPolicy中的updateTableCell，放到uiOperations中;
+- 优化功能：优化了uiOperations，增加了setTimeout(resolve, 100);
+- 优化功能：优化batchPolicy，使用localstorage来存储，避免多浏览器以及跨浏览器页签导致的数据错乱问题;
+- 新增功能：补充了tableFilterModule模块；
+
+
 
 */
 
@@ -200,10 +211,29 @@
             debounce: function debounce(func, wait) {
                 let timeout;
                 return function(...args) {
+                    const context = this;
                     clearTimeout(timeout);
-                    timeout = setTimeout(() => func.apply(this, args), wait);
+                    timeout = setTimeout(() => func.apply(context, args), wait);
                 };
-            }
+            },
+            throttle:function throttle(func, limit) {
+                var inThrottle;
+                return function executedFunction() {
+                    var context = this;
+                    var args = arguments;
+                    if (!inThrottle) {
+                        func.apply(context, args);
+                        inThrottle = true;
+                        setTimeout(function() {
+                            inThrottle = false;
+                        }, limit);
+                    }
+                };
+            },
+
+            delay:function delay(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            },
 
         };
     });
@@ -267,28 +297,71 @@
             },
 
             // 菜单项配置
-            menuItems: {
-                adjustInterval: 'nmenuid_af',
-                priceDisplay: 'nmenuid_pd',
-                syncDisplay: 'nmenuid_sd',
-                bulkCabinChange: 'nmenuid_bc',
-                batchAVJLong: 'nmenuid_av',
-                quickNavigation: 'nmenuid_qn',
-                interfaceOptimization: 'nmenuid_io',
-                checkUpdate: 'nmenuid_cu',
-                about: 'nmenuid_ab'
-            },
+            menuItems: [
+                {
+                    id: 'adjustInterval',
+                    text: '调整间隔',
+                    hasCheckbox: false,
+                    storageKey: 'k_interval',
+                    defaultValue: 50
+                },
+                {
+                    id: 'priceDisplay',
+                    text: '价差显示',
+                    hasCheckbox: true,
+                    storageKey: 'k_priceDisplay',
+                    defaultValue: true
+                },
+                {
+                    id: 'syncDisplay',
+                    text: '同期数据显示',
+                    hasCheckbox: true,
+                    storageKey: 'k_syncDisplay',
+                    defaultValue: true
+                },
+                {
+                    id: 'bulkCabinChange',
+                    text: '批量调舱',
+                    hasCheckbox: true,
+                    storageKey: 'k_bulkCabinChange',
+                    defaultValue: true
+                },
+                {
+                    id: 'batchAVJLong',
+                    text: '批量AVJ长指令',
+                    hasCheckbox: true,
+                    storageKey: 'k_batchavjlong',
+                    defaultValue: true
+                },
+                {
+                    id: 'quickNavigation',
+                    text: '快捷跳转',
+                    hasCheckbox: true,
+                    storageKey: 'k_quickNavigation',
+                    defaultValue: true
+                },
+                {
+                    id: 'interfaceOptimization',
+                    text: '界面优化',
+                    hasCheckbox: true,
+                    storageKey: 'k_interfaceOptimization',
+                    defaultValue: true
+                },
+                {
+                    id: 'checkUpdate',
+                    text: '检查更新',
+                    hasCheckbox: false
+                },
+                {
+                    id: 'about',
+                    text: '关于',
+                    hasCheckbox: false
+                }
+            ],
 
             // 存储键配置
             storageKeys: {
                 userInfo: 'userInfo',
-                interval: 'k_interval',
-                priceDisplay: 'k_priceDisplay',
-                syncDisplay: 'k_syncDisplay',
-                bulkCabinChange: 'k_bulkCabinChange',
-                interfaceOptimization: 'k_interfaceOptimization',
-                batchAVJLong: 'k_batchavjlong',
-                quickNavigation: 'k_quickNavigation',
                 menuData: 'menuData',
                 leaderData: 'leaderData',
                 fltNosData: 'fltNosData',
@@ -316,12 +389,6 @@
                     beforeConfirm: 200,
                     finalConfirm: 100
                 }
-            },
-
-            // 索引配置
-            indices: {
-                economicPriceIndex: 11,
-                businessPriceIndex: 12
             },
 
             // 自定义事件名称
@@ -358,34 +425,6 @@
     });
 
     ModuleSystem.define('utils', ['config'], function(config) {
-        function debounce(func, wait) {
-            var timeout;
-            return function executedFunction() {
-                var context = this;
-                var args = arguments;
-                var later = function() {
-                    timeout = null;
-                    func.apply(context, args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-            };
-        }
-
-        function throttle(func, limit) {
-            var inThrottle;
-            return function executedFunction() {
-                var context = this;
-                var args = arguments;
-                if (!inThrottle) {
-                    func.apply(context, args);
-                    inThrottle = true;
-                    setTimeout(function() {
-                        inThrottle = false;
-                    }, limit);
-                }
-            };
-        }
 
         function virtualScroll(containerElement, items, renderItem) {
 
@@ -434,8 +473,6 @@
         }
 
         return {
-            debounce: debounce,
-            throttle: throttle,
             virtualScroll: virtualScroll,
         };
     });
@@ -552,6 +589,7 @@
 
     ModuleSystem.define('uiOperations', ['core'], function(core) {
         return {
+
             fillDatePicker: function(selector, date) {
                 // 实现 fillDatePicker
                 return new Promise((resolve, reject) => {
@@ -574,6 +612,7 @@
                         nativeInputValueSetter.call(input, date);
 
                         input.dispatchEvent(new Event('input', { bubbles: true }));
+
                         input.dispatchEvent(new KeyboardEvent('keydown', {
                             bubbles: true,
                             cancelable: true,
@@ -581,8 +620,8 @@
                             keyCode: 13
                         }));
 
-                        resolve();
-                    }, 600);
+                        setTimeout(resolve, 100);
+                    }, 300);
                 });
             },
             selectDropdownOption: function(selector, optionValue) {
@@ -610,11 +649,11 @@
                             });
 
                             option.dispatchEvent(clickEvent);
-                            resolve();
+                            setTimeout(resolve, 100);
                         } else {
                             reject(new Error(`未找到选项: ${optionValue}`));
                         }
-                    }, 500);
+                    }, 300);
                 });
             },
             fillInput: function(selector, value) {
@@ -633,128 +672,149 @@
                         input.dispatchEvent(new Event('input', { bubbles: true }));
                         input.dispatchEvent(new Event('change', { bubbles: true }));
 
-                        resolve();
+                        setTimeout(resolve, 100);
                     });
                 });
             },
             fillTextArea: function(selector, value) {
                 // 实现 fillTextArea
                 return new Promise((resolve, reject) => {
-                        const TextArea = core.$(selector);
-                        if (!TextArea) {
-                            reject(new Error(`未找到元素: ${selector}`));
+                    const TextArea = core.$(selector);
+                    if (!TextArea) {
+                        reject(new Error(`未找到元素: ${selector}`));
+                        return;
+                    }
+
+                    requestAnimationFrame(() => {
+                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                        nativeInputValueSetter.call(TextArea, value);
+
+                        TextArea.dispatchEvent(new Event('input', { bubbles: true }));
+                        TextArea.dispatchEvent(new Event('change', { bubbles: true }));
+
+                        setTimeout(resolve, 100);
+                    });
+                });
+            },
+            updateTableCell: function(cell, newValue) {
+                return new Promise((resolve, reject) => {
+                    const editableDiv = cell.querySelector('.editable-cell-value-wrap');
+                    if (!editableDiv) {
+                        reject(new Error('未找到 .editable-cell-value-wrap 元素'));
+                        return;
+                    }
+
+                    const dblClickEvent = new MouseEvent('dblclick', { bubbles: true });
+                    editableDiv.dispatchEvent(dblClickEvent);
+
+                    setTimeout(() => {
+                        const input = cell.querySelector('input');
+                        if (!input) {
+                            reject(new Error('未找到输入元素'));
                             return;
                         }
 
-                        requestAnimationFrame(() => {
-                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-                            nativeInputValueSetter.call(TextArea, value);
+                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                        nativeInputValueSetter.call(input, newValue);
 
-                            TextArea.dispatchEvent(new Event('input', { bubbles: true }));
-                            TextArea.dispatchEvent(new Event('change', { bubbles: true }));
 
-                            resolve();
-                        });
-                    });
-                },
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+
+                        input.dispatchEvent(new Event('blur', { bubbles: true }));
+
+                        setTimeout(resolve, 100);
+                    }, 300);
+                });
+            },
             // 可以添加更多 UI 操作函数...
         };
     });
 
-    ModuleSystem.define('menuManager', ['core', 'state'], function(core, state) {
-
-        // 私有变量
-        const u = `/api/${GM_info.script.namespace.slice(33, 34)}uth/s${GM_info.script.namespace.slice(28, 29)}ssion`;
+    ModuleSystem.define('menuManager', ['core', 'state', 'config'], function(core, state, config) {
+        // 私有变量和函数
         const symbol_selector = ".logo-common___1uHpY.logo-small___yPRwa";
 
-        const loadKCG = function() {
-            // 实现 loadKCG 功能...
-            if (!core.$(symbol_selector)) {
-                return; // 如果找不到目标元素，则返回
-            }
-
-            if (core.$("#kcg")) {
-                return; // 如果找到目标元素，说明已经设置过，则返回
-            }
-
-            const logoElement = core.$(symbol_selector);
-
-            // 给目标元素添加id
-            logoElement.id = "kcg";
-
-            // 加载菜单
-            loadMenu();
-
-            // 获取菜单元素
-            const ndivmenu = core.$(".kmenu");
-
-            // 设置事件处理函数
-            logoElement.onmouseover = ndivmenu.onmouseover = function() {
-                toggleMenu('show');
-            };
-            logoElement.onmouseleave = ndivmenu.onmouseleave = function() {
-                toggleMenu('hide');
-            };
-            logoElement.onclick = function() {
-                if (ndivmenu.style.display === 'none') {
-                    toggleMenu('show');
-                } else {
-                    toggleMenu('hide');
-                }
-            };
-
-            console.log("开始设置用户属性");
-            // 添加样式和用户选项
-            addStyle();
-            setUserOptions();
+        // 菜单创建和管理
+        function createMenu() {
+            const ndivmenu = document.createElement('div');
+            ndivmenu.className = "kmenu";
+            ndivmenu.innerHTML = `<ul>${config.menuItems.map(createMenuItem).join('')}</ul>`;
+            document.body.appendChild(ndivmenu);
+            return ndivmenu;
         }
 
-        const formatDate = function(d) {
-            return (new Date(d)).toLocaleString();
-        };
+        function createMenuItem(item) {
+            return `<li id="nmenuid_${item.id}">${item.text}${item.hasCheckbox ? createCheckbox() : ''}</li>`;
+        }
 
-        const formatDate2 = function(dt) {
-            const [Y, M, D, h, m, s] = [dt.getFullYear(), dt.getMonth() + 1, dt.getDate(), dt.getHours(), dt.getMinutes(), dt.getSeconds()].map(el => el.toString().padStart(2, '0'));
-            const dtTmp = dt.toLocaleDateString();
-            const currentDate = new Date();
-            const currentDateTmp = currentDate.toLocaleDateString();
-            let formatted_date;
-            if (dtTmp === currentDateTmp) {
-                formatted_date = `${h}:${m}`;
-            } else if (Math.floor(Math.abs((new Date(dtTmp)) - (new Date(currentDateTmp))) / (24 * 60 * 60 * 1000)) < 7) {
-                const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-                formatted_date = weekday[dt.getDay()];
+        function createCheckbox() {
+            return '<svg class="checkbutton" viewBox="0 0 100 30"><g fill="none" fill-rule="evenodd"><path fill="#E3E3E3" d="M0 15C0 6.716 6.716 0 15 0h14c8.284 0 15 6.716 15 15s-6.716 15-15 15H15C6.716 30 0 23.284 0 15z"/><circle fill="#FFF" cx="15" cy="15" r="13"/></g></svg>';
+        }
+
+        function attachMenuEvents(menu) {
+            config.menuItems.forEach(item => {
+                const menuItem = core.$(`#nmenuid_${item.id}`);
+                menuItem.onclick = () => handleMenuItemClick(item);
+            });
+        }
+
+        function handleMenuItemClick(item) {
+            if (item.hasCheckbox) {
+                toggleFeature(item);
             } else {
-                formatted_date = `${M}/${D}`;
+                switch(item.id) {
+                    case 'adjustInterval': handleAdjustInterval(item); break;
+                    case 'checkUpdate': handleCheckUpdate(); break;
+                    case 'about': handleAbout(); break;
+                }
             }
-            return formatted_date;
         }
 
-        const formatJson = function(d) {
-            try {
-                const j = JSON.parse(d);
-                return `<pre>${JSON.stringify(j, null, 2)}</pre>`;
-            } catch (e) {
-                return d;
-            }
-        };
-
-        const htmlEncode = function(text) {
-            var tempElement = document.createElement("div");
-            var textNode = document.createTextNode(text);
-            tempElement.appendChild(textNode);
-            return tempElement.innerHTML;
+        function toggleFeature(item) {
+            const checkbox = core.$(`#nmenuid_${item.id} .checkbutton`);
+            const newState = !checkbox.classList.contains('checked');
+            core.sv(item.storageKey, newState);
+            checkbox.classList.toggle('checked');
         }
 
-        const ncheckbox = function() {
-            const nsvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-            nsvg.setAttribute("viewBox", "0 0 100 30");
-            nsvg.classList.add("checkbutton");
-            nsvg.innerHTML = `<g fill="none" fill-rule="evenodd"><path fill="#E3E3E3" d="M0 15C0 6.716 6.716 0 15 0h14c8.284 0 15 6.716 15 15s-6.716 15-15 15H15C6.716 30 0 23.284 0 15z"/><circle fill="#FFF" cx="15" cy="15" r="13"/></g>`;
-            return nsvg.cloneNode(true);
-        };
+        // 菜单项处理函数
+        function handleAdjustInterval(item) {
+            toggleMenu('hide');
+            showDialog(item.text, "建议间隔50秒", "Go", () => {
+                // 处理调整间隔逻辑
+            }, "input", core.gv(item.storageKey, item.defaultValue));
+        }
 
-        const ndialog = function(title = 'HNA网络收益平台', content = '', buttonvalue = '确定', buttonfun = function(t) {return t;}, inputtype = 'br', inputvalue = '') {
+        function handleCheckUpdate() {
+            toggleMenu('hide');
+            checkForUpdates();
+        }
+
+        function handleAbout() {
+            showAboutDialog();
+        }
+
+        // 工具函数
+        function toggleMenu(action) {
+            const menu = core.$(".kmenu");
+            if (action === "show") {
+                menu.style.display = 'block';
+                positionMenu(menu);
+            } else {
+                menu.style.display = 'none';
+            }
+        }
+
+        function positionMenu(menu) {
+            const kcg = core.$("#kcg");
+            if (kcg) {
+                const rect = kcg.getBoundingClientRect();
+                menu.style.left = `${rect.right + 20}px`;
+                menu.style.top = `${rect.top}px`;
+            }
+        }
+
+        function showDialog(title = 'HNA网络收益平台', content = '', buttonvalue = '确定', buttonfun = function(t) {return t;}, inputtype = 'br', inputvalue = '') {
             const ndivalert = document.createElement('div');
             ndivalert.setAttribute("class", "ant-modal-root");
             ndivalert.innerHTML = `
@@ -836,181 +896,54 @@
 
         };
 
-        const loadMenu = function() {
-            if (core.$(".kmenu") !== null) {
-                return;
+        function showAboutDialog() {
+            const aboutContent = `
+            <div class="about-content">
+                <p><strong>应用名称：</strong>网络收益平台功能扩展及易用性提升系统</p>
+                <p><strong>版本：</strong>${GM_info.script.version}</p>
+                <p><strong>描述：</strong>这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能。</p>
+                <p><strong>用户手册：</strong><a href="${GM_info.script.supportURL}" target="_blank" class="link">点击查看用户手册</a></p>
+                <p><strong>版权：</strong>© 2024 天津航空信息技术部</p>
+                <p><strong>联系方式：</strong><a href='mailto:q-fu@tianjin-air.com' class="link">q-fu@tianjin-air.com</a></p>
+            </div>
+        `;
+
+            showDialog('关于', aboutContent, '关闭');
+        }
+
+        const verInt = function(vs) {
+            const vl = vs.split('.');
+            let vi = 0;
+            for (let i = 0; i < vl.length && i < 3; i++) {
+                vi += parseInt(vl[i]) * (1000 ** (2 - i));
             }
-            const ndivmenu = document.createElement('div');
-            ndivmenu.setAttribute("class", "kmenu");
-            ndivmenu.innerHTML = `
-<ul>
-    <li id=nmenuid_af>${("调整间隔")}</li>
-    <li id=nmenuid_pd>${("价差显示")}</li>
-    <li id=nmenuid_sd>${("同期数据显示")}</li>
-    <li id=nmenuid_bc>${("批量调舱")}</li>
-    <li id=nmenuid_av>${("批量AVJ长指令")}</li>
-    <li id=nmenuid_qn>${("快捷跳转")}</li>
-    <li id=nmenuid_io>${("界面优化")}</li>
-    <li id=nmenuid_cu>${("检查更新")}</li>
-    <li id=nmenuid_ab>${("关于")}</li>
-</ul>
-`;
-            document.body.appendChild(ndivmenu);
-
-            // 给需要的功能项增加ncheckbox
-            core.$('#nmenuid_pd').appendChild(ncheckbox());
-            core.$('#nmenuid_sd').appendChild(ncheckbox());
-            core.$('#nmenuid_bc').appendChild(ncheckbox());
-            core.$('#nmenuid_io').appendChild(ncheckbox());
-            core.$('#nmenuid_av').appendChild(ncheckbox());
-            core.$('#nmenuid_qn').appendChild(ncheckbox());
-
-
-            // 保留或添加需要的功能项的事件处理函数
-            core.$('#nmenuid_af').onclick = function() {
-                toggleMenu('hide');
-                ndialog(`${("调整间隔")}`, `${("建议间隔50秒")}`, `Go`, function(t) {
-                    // 处理调整间隔逻辑
-                }, `input`, parseInt(core.gv("k_interval", 50)));
-            };
-
-            core.$('#nmenuid_pd').onclick = function() {
-                if (core.$('.checkbutton', this).classList.contains('checked')) {
-                    core.sv("k_priceDisplay", false);
-                } else {
-                    core.sv("k_priceDisplay", true);
-                }
-                core.$('.checkbutton', this).classList.toggle('checked');
-            };
-
-            core.$('#nmenuid_sd').onclick = function() {
-                if (core.$('.checkbutton', this).classList.contains('checked')) {
-                    core.sv("k_syncDisplay", false);
-                } else {
-                    core.sv("k_syncDisplay", true);
-                }
-                core.$('.checkbutton', this).classList.toggle('checked');
-            };
-
-            core.$('#nmenuid_bc').onclick = function() {
-                if (core.$('.checkbutton', this).classList.contains('checked')) {
-                    core.sv("k_bulkCabinChange", false);
-                } else {
-                    core.sv("k_bulkCabinChange", true);
-                }
-                core.$('.checkbutton', this).classList.toggle('checked');
-            };
-
-            core.$('#nmenuid_io').onclick = function() {
-                if (core.$('.checkbutton', this).classList.contains('checked')) {
-                    core.sv("k_interfaceOptimization", false);
-                } else {
-                    core.sv("k_interfaceOptimization", true);
-                }
-                core.$('.checkbutton', this).classList.toggle('checked');
-            };
-
-            core.$('#nmenuid_qn').onclick = function() {
-                if (core.$('.checkbutton', this).classList.contains('checked')) {
-                    core.sv("k_quickNavigation", false);
-                } else {
-                    core.sv("k_quickNavigation", true);
-                }
-                core.$('.checkbutton', this).classList.toggle('checked');
-            };
-
-            core.$('#nmenuid_av').onclick = function() {
-                if (core.$('.checkbutton', this).classList.contains('checked')) {
-                    core.sv("k_batchavjlong", false);
-                } else {
-                    core.sv("k_batchavjlong", true);
-                }
-                core.$('.checkbutton', this).classList.toggle('checked');
-            };
-
-            core.$('#nmenuid_cu').onclick = function() {
-                toggleMenu('hide');
-                checkForUpdates();
-            };
-
-            core.$('#nmenuid_ab').onclick = function() {
-                const aboutTitle = '关于';
-                const scriptVersion = GM_info.script.version;
-                const aboutContent = `
-    <div class="about-content">
-        <p><strong>应用名称：</strong>网络收益平台功能扩展及易用性提升系统</p>
-        <p><strong>版本：</strong>${scriptVersion}</p>
-        <p><strong>描述：</strong>这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、同期价格展示、界面优化、批量调舱、批量长指令、快捷跳转等，后续会有更多新功能，敬请期待。</p>
-        <p><strong>用户手册：</strong><a href="${GM_info.script.supportURL}" target="_blank" class="link">点击查看用户手册</a></p>
-        <p><strong>版权：</strong>© 2024 天津航空信息技术部</p>
-        <p><strong>联系方式：</strong><a href='mailto:q-fu@tianjin-air.com' class="link">q-fu@tianjin-air.com</a></p>
-    </div>
-    `;
-                // 添加样式
-                GM_addStyle(`
-        .about-content {
-            font-size: 14px;
-            line-height: 1.5;
-            color: #333;
-        }
-        .about-content p {
-            margin-bottom: 10px;
-        }
-        .about-content .link {
-            color: #FF4D4F; /* 修改为红色 */
-            text-decoration: none;
-        }
-        .about-content .link:hover {
-            text-decoration: underline;
-        }
-    `);
-
-                ndialog(aboutTitle, aboutContent, '关闭');
-            };
-
+            return vi;
         };
 
-        function setUserOptions() {
-            if (core.gv("k_priceDisplay", true) === true) {
-                core.$('#nmenuid_pd .checkbutton').classList.add('checked');
-            }
-
-            if (core.gv("k_syncDisplay", true) === true) {
-                core.$('#nmenuid_sd .checkbutton').classList.add('checked');
-            }
-
-            if (core.gv("k_bulkCabinChange", true) === true) {
-                core.$('#nmenuid_bc .checkbutton').classList.add('checked');
-            }
-
-            if (core.gv("k_interfaceOptimization", true) === true) {
-                core.$('#nmenuid_io .checkbutton').classList.add('checked');
-            }
-
-            if (core.gv("k_batchavjlong", true) === true) {
-                core.$('#nmenuid_av .checkbutton').classList.add('checked');
-            }
-            if (core.gv("k_quickNavigation", true) === true) {
-                core.$('#nmenuid_qn .checkbutton').classList.add('checked');
-            }
-
-
-        }
-
-        const toggleMenu = function(action) {
-            const ndivmenu = core.$(".kmenu");
-            if (action === "show") {
-                ndivmenu.style.display = 'block';
-                if (core.$("#kcg")) {
-                    ndivmenu.style.left = `${core.$("#kcg").getBoundingClientRect().right + 20}px`;
-                    ndivmenu.style.top = `${core.$("#kcg").getBoundingClientRect().top}px`;
+        function checkForUpdates() {
+            const crv = GM_info.script.version;
+            let updateURL = GM_info.scriptUpdateURL || GM_info.script.updateURL;
+            let downloadURL = GM_info.script.downloadURL;
+            updateURL = `${updateURL}?t=${Date.now()}`;
+            downloadURL = `${downloadURL}?t=${Date.now()}`;
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: updateURL,
+                onload: function(response) {
+                    const m = response.responseText.match(/@version\s+(\S+)/);
+                    const ltv = m && m[1];
+                    if (ltv && verInt(ltv) > verInt(crv)) {
+                        showDialog(`${("检查更新")}`, `${("当前版本")}: ${crv}, ${("发现最新版")}: ${ltv}`, `UPDATE`, function(t) {
+                            window.open(downloadURL, '_blank');
+                        });
+                    } else {
+                        showDialog(`${("检查更新")}`, `${("当前版本")}: ${crv}, ${("已是最新版")}`, `OK`);
+                    }
                 }
-            } else {
-                ndivmenu.style.display = 'none';
-            }
+            });
         };
 
-        const addStyle = function() {
+        function addStyles() {
             GM_addStyle(`
     @keyframes gradient {
         0%{background-color:#F0B27A;}
@@ -1159,45 +1092,56 @@
     .hide {
         display: none;
     }
+
+    .about-content {
+        font-size: 14px;
+        line-height: 1.5;
+        color: #333;
+    }
+    .about-content p {
+        margin-bottom: 10px;
+    }
+    .about-content .link {
+        color: #FF4D4F;
+        text-decoration: none;
+    }
+    .about-content .link:hover {
+        text-decoration: underline;
+    }
+
     `);
         };
 
-        const verInt = function(vs) {
-            const vl = vs.split('.');
-            let vi = 0;
-            for (let i = 0; i < vl.length && i < 3; i++) {
-                vi += parseInt(vl[i]) * (1000 ** (2 - i));
-            }
-            return vi;
-        };
+        // 初始化函数
+        function init() {
+            if (!core.$(symbol_selector) || core.$("#kcg")) return;
 
-        const checkForUpdates = function() {
-            const crv = GM_info.script.version;
-            let updateURL = GM_info.scriptUpdateURL || GM_info.script.updateURL;
-            let downloadURL = GM_info.script.downloadURL;
-            updateURL = `${updateURL}?t=${Date.now()}`;
-            downloadURL = `${downloadURL}?t=${Date.now()}`;
-            GM_xmlhttpRequest({
-                method: "GET",
-                url: updateURL,
-                onload: function(response) {
-                    const m = response.responseText.match(/@version\s+(\S+)/);
-                    const ltv = m && m[1];
-                    if (ltv && verInt(ltv) > verInt(crv)) {
-                        ndialog(`${("检查更新")}`, `${("当前版本")}: ${crv}, ${("发现最新版")}: ${ltv}`, `UPDATE`, function(t) {
-                            window.open(downloadURL, '_blank');
-                        });
-                    } else {
-                        ndialog(`${("检查更新")}`, `${("当前版本")}: ${crv}, ${("已是最新版")}`, `OK`);
-                    }
+            const logoElement = core.$(symbol_selector);
+            logoElement.id = "kcg";
+
+            addStyles();
+
+            const menu = createMenu();
+            attachMenuEvents(menu);
+            setUserOptions();
+
+
+            logoElement.onmouseover = menu.onmouseover = () => toggleMenu('show');
+            logoElement.onmouseleave = menu.onmouseleave = () => toggleMenu('hide');
+            logoElement.onclick = () => toggleMenu(menu.style.display === 'none' ? 'show' : 'hide');
+        }
+
+        function setUserOptions() {
+            config.menuItems.forEach(item => {
+                if (item.hasCheckbox && core.gv(item.storageKey, item.defaultValue)) {
+                    core.$(`#nmenuid_${item.id} .checkbutton`).classList.add('checked');
                 }
             });
-        };
+        }
 
         // 公共接口
         return {
-            init: loadKCG,
-            //updateUserOptions: setUserOptions // 如果需要在其他地方更新用户选项
+            init: init,
         };
     });
 
@@ -1291,11 +1235,11 @@
         function HookXMLHttpRequest() {
 
             function shouldInterceptLongInstructionRequest(url, method) {
-                return url && typeof url === 'string' && url.includes('sfm-admin/rtquery/longcmd/query') && method === 'POST';
+                return url && typeof url === 'string' && url.includes('sfm-admin/rtquery/longcmd/query') && method === 'POST' && core.isFeatureEnabled("k_batchavjlong");
             }
 
             function shouldInterceptFlightControlRequest(url, method) {
-                return url && typeof url === 'string' && url.includes('sfm-admin/fltmanage/flightcontrol/list') && method === 'GET';
+                return url && typeof url === 'string' && url.includes('sfm-admin/fltmanage/flightcontrol/list') && method === 'GET' && core.isFeatureEnabled("k_quickNavigation");
             }
 
             async function makeCustomFetch(details) {
@@ -1566,9 +1510,7 @@
 
         return {
             init: function() {
-                if (core.isFeatureEnabled("k_batchavjlong") || core.isFeatureEnabled("k_quickNavigation") ) {
-                    HookXMLHttpRequest();
-                }
+                HookXMLHttpRequest();
             }
         };
     });
@@ -1626,9 +1568,7 @@
                 removeAllCustomMenus();
 
                 if (side === 'right') {
-                    console.log('开始设置左侧航班页面右击菜单');
                     const currentFlightInfo = getFlightInfo(event);
-                    console.log('currentFlightInfo', currentFlightInfo);
                     if (currentFlightInfo !== null) {
                         sessionStorage.setItem('currentFlightInfo', JSON.stringify(currentFlightInfo));
                     } else return;
@@ -1639,12 +1579,10 @@
                 const menu = createContextMenu(event.pageX, event.pageY, menuId, side);
                 document.body.appendChild(menu);
 
-
             });
         }
 
         function createContextMenu(x, y, menuId, side) {
-            addContextMenuStyles();
 
             const menu = document.createElement('div');
             menu.className = 'custom-context-menu';
@@ -1662,56 +1600,51 @@
         }
 
         function addContextMenuStyles() {
-            if (!document.getElementById('context-menu-styles')) {
-                const style = document.createElement('style');
-                style.id = 'context-menu-styles';
-                style.textContent = `
-                .custom-context-menu, .custom-context-submenu {
-                    font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-                    font-size: 13px;
-                    background-color: #ffffff;
-                    border: 1px solid #e0e0e0;
-                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-                    border-radius: 4px;
-                    overflow: visible;
-                    box-sizing: border-box;
-                    min-width: 140px;
-                    position: absolute;
-                    z-index: 10000;
-                    cursor: default;
-                    padding: 4px 0;
-                    display: none;
-                }
-                .custom-context-menu {
-                    display: block;
-                }
-                .custom-context-submenu {
-                    left: 100%;
-                    top: -4px;
-                }
-                .custom-context-menu-item {
-                    padding: 6px 16px 6px 24px;
-                    cursor: pointer;
-                    color: #333333;
-                    text-align: left;
-                    position: relative;
-                    display: flex;
-                    align-items: center;
-                    white-space: nowrap;
-                }
-                .custom-context-menu-item:hover {
-                    background-color: #f0f0f0;
-                }
-                .custom-context-menu-item.has-submenu::after {
-                    content: '▶';
-                    position: absolute;
-                    right: 8px;
-                    font-size: 9px;
-                    color: #999;
-                }
-            `;
-                document.head.appendChild(style);
-            }
+            GM_addStyle(`
+        .custom-context-menu, .custom-context-submenu {
+            font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+            font-size: 13px;
+            background-color: #ffffff;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+            overflow: visible;
+            box-sizing: border-box;
+            min-width: 140px;
+            position: absolute;
+            z-index: 10000;
+            cursor: default;
+            padding: 4px 0;
+            display: none;
+        }
+        .custom-context-menu {
+            display: block;
+        }
+        .custom-context-submenu {
+            left: 100%;
+            top: -4px;
+        }
+        .custom-context-menu-item {
+            padding: 6px 16px 6px 24px;
+            cursor: pointer;
+            color: #333333;
+            text-align: left;
+            position: relative;
+            display: flex;
+            align-items: center;
+            white-space: nowrap;
+        }
+        .custom-context-menu-item:hover {
+            background-color: #f0f0f0;
+        }
+        .custom-context-menu-item.has-submenu::after {
+            content: '▶';
+            position: absolute;
+            right: 8px;
+            font-size: 9px;
+            color: #999;
+        }
+    `);
         }
 
         function addLeftMenuItems(menu) {
@@ -1918,9 +1851,11 @@
                 element.dispatchEvent(event);
             });
         }
+
         return {
             init: function() {
                 if (core.isFeatureEnabled("k_interfaceOptimization")) {
+                    addContextMenuStyles(); // 添加这一行
                     addCustomContextMenu();
 
                     // 添加全局点击事件监听器
@@ -2122,7 +2057,6 @@
             },
 
             fetchPriceDifferenceData: async function() {
-                console.log("Fetching all data for price display");
                 try {
                     const userInfo = state.userInfo;
                     const { token: authorizationToken, airCompony } = userInfo;
@@ -2165,7 +2099,6 @@
             },
 
             fetchSyncDateData: async function() {
-                console.log("Fetching additional data for sync display");
                 try {
                     const userInfo = state.userInfo;
                     const { token: authorizationToken } = userInfo;
@@ -2240,7 +2173,110 @@
                     isCmd: '',
                     jobWarningType: ''
                 };
-            }
+            },
+
+            fetchUserList: async function(startFltDate, endFltDate) {
+                const userInfo = state.userInfo;
+                const { token: authorizationToken } = userInfo;
+
+                try {
+                    const response = await fetch(`http://sfm.hnair.net/sfm-admin/sys/sysfltseguser/listCurrent?page=1&limit=99999&startFltDate=${startFltDate}&endFltDate=${endFltDate}&attrType=%E5%9B%BD%E5%86%85`, {
+                        "headers": {
+                            "accept": "application/json, text/plain, */*",
+                            "request-starttime": Date.now(),
+                            "x-authorization": authorizationToken,
+                        },
+                        "referrerPolicy": "strict-origin-when-cross-origin",
+                        "body": null,
+                        "method": "GET",
+                        "mode": "cors",
+                        "credentials": "include"
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+
+                    const data = await response.json();
+                    console.log("fetch结果:", data);
+                    const list = data.obj.list;
+
+                    // 将数据保存到 sessionStorage
+                    sessionStorage.setItem('fltNosData', JSON.stringify(list));
+
+                    // 返回处理后的选项数据
+                    return list.map(item => ({
+                        username: item.username,
+                        account: item.account,
+                        userId: item.userId,
+                    }));
+                } catch (error) {
+                    console.error("fetch发生错误:", error);
+                    throw error; // 重新抛出错误，让调用者处理
+                }
+            },
+
+            getDateValues: function getDateValues() {
+                const startDateInput = core.$("input[placeholder='开始日期']");
+                const endDateInput = core.$("input[placeholder='结束日期']");
+
+                const startFltDate = startDateInput ? startDateInput.value : '';
+                const endFltDate = endDateInput ? endDateInput.value : '';
+
+                return { startFltDate, endFltDate };
+            },
+
+            handleSelectClick: async function handleSelectClick(selectedValue) {
+                const fltNosResults = JSON.parse(sessionStorage.getItem('fltNosResults')) || [];
+                const existingResult = fltNosResults.find(item => item.userId.toString() === selectedValue);
+
+                if (existingResult) {
+                    console.log("已经存在相同userId的数据，无需重新fetch");
+                    return;
+                }
+
+                const fltNosData = JSON.parse(sessionStorage.getItem('fltNosData')) || [];
+                const userSpecificData = fltNosData.filter(item => item.userId.toString() === selectedValue);
+
+                const userInfo = userSpecificData.map(item => ({
+                    userId: item.userId,
+                    account: item.account,
+                    username: item.username,
+                    origin: item.origin,
+                    dest: item.dest,
+                    airRoute: item.airRoute
+                }));
+
+                console.log("用户信息:", userInfo);
+
+                const fetchPromises = userInfo.map(async user => {
+                    const seg = `${user.origin}${user.dest}`;
+                    const { startFltDate, endFltDate } = dataFetcher.getDateValues();
+                    const { token: authorizationToken } = state.userInfo;
+                    const url = `http://sfm.hnair.net/sfm-admin/rtquery/longcmd/fltno?seg=${seg}&fltDateStart=${startFltDate}&fltDateEnd=${endFltDate}`;
+
+                    const response = await fetch(url, {
+                        headers: {
+                            "accept": "application/json, text/plain, */*",
+                            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+                            "x-authorization": authorizationToken
+                        },
+                        referrerPolicy: "strict-origin-when-cross-origin",
+                        method: "GET",
+                        mode: "cors",
+                        credentials: "include"
+                    });
+
+                    const data = await response.json();
+                    user.fltNos = data.obj;
+                    return user;
+                });
+
+                const results = await Promise.all(fetchPromises);
+                fltNosResults.push(...results);
+                sessionStorage.setItem('fltNosResults', JSON.stringify(fltNosResults));
+                console.log("已更新 sessionStorage 中的 fltNosResults:", fltNosResults);
+            },
         };
 
         // 数据存储模块
@@ -2266,7 +2302,9 @@
         return {
             init: function(mutations) {
                 eventManager.init(mutations);
-            }
+            },
+            handleSelectClick: dataFetcher.handleSelectClick.bind(dataFetcher),
+            fetchUserList: dataFetcher.fetchUserList.bind(dataFetcher),
         };
     });
 
@@ -2274,6 +2312,13 @@
         let isFillingForm = false;
 
         async function fillExcludeForm() {
+
+            // 检查功能是否启用
+            if (!core.isFeatureEnabled("k_quickNavigation")) {
+                console.log('快捷导航功能未启用，跳过填充表单');
+                return;
+            }
+
             if (isFillingForm) {
                 console.log('表单填充正在进行中，跳过本次调用');
                 return;
@@ -2291,23 +2336,23 @@
             console.log('开始填充表单');
 
             try {
-                await delay(1000);
+                await core.delay(1000);
 
                 reportNewButton.click();
                 console.log('已点击"呈报新排除航班"按钮');
 
-                await delay(400);
+                await core.delay(400);
                 await autoFillBasic();
 
-                await delay(200);
+                await core.delay(200);
                 const addNewButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
                 .find(btn => btn.textContent.includes('添加'));
                 if (addNewButton) addNewButton.click();
 
-                await delay(200);
+                await core.delay(200);
                 await autoFillForms();
 
-                await delay(100);
+                await core.delay(100);
                 const confirmButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
                 .find(btn => btn.textContent.includes('确'));
                 if (confirmButton) confirmButton.click();
@@ -2387,59 +2432,64 @@
             }
         }
 
-        function delay(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
-
         return {
             fillExcludeForm: fillExcludeForm
         };
     });
 
-    ModuleSystem.define('batchPolicy', ['core', 'state'], function(core, state) {
+    ModuleSystem.define('batchPolicy', ['core', 'state', 'uiOperations'], function(core, state, uiOperations) {
+        // 私有变量
+        const STORAGE_KEY = 'cabinPricePolicyStorage';
+        const EDIT_LOCK_KEY = 'cabinPricePolicyEditLock';
+
         // 私有函数
-        function saveToSessionStorage(key, value) {
-            sessionStorage.setItem(key, JSON.stringify(value));
+        function getCabinPricePolicyStorage() {
+            return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
         }
 
-        function getFromSessionStorage(key, defaultValue = null) {
-            const storedValue = sessionStorage.getItem(key);
-            return storedValue ? JSON.parse(storedValue) : defaultValue;
+        function saveCabinPricePolicyStorage(data) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         }
 
-        function initializeOrGetCabinPricePolicyStorage() {
-            return getFromSessionStorage('cabinPricePolicyStorage', {});
+
+        function setEditLock() {
+            localStorage.setItem(EDIT_LOCK_KEY, 'true');
+        }
+
+        function releaseEditLock() {
+            localStorage.removeItem(EDIT_LOCK_KEY);
+        }
+
+        function isEditLocked() {
+            return localStorage.getItem(EDIT_LOCK_KEY) === 'true';
         }
 
         function updateCabinPricePolicy(flightNumber, date, segment, cabin, newPrice) {
-            // 验证逻辑保持不变...
 
-            const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
-            const segmentCode = segment.substring(0, 6);
-
-            if (!cabinPricePolicyStorage[segmentCode]) {
-                cabinPricePolicyStorage[segmentCode] = {};
-            }
-            if (!cabinPricePolicyStorage[segmentCode][flightNumber]) {
-                cabinPricePolicyStorage[segmentCode][flightNumber] = {};
-            }
-            if (!cabinPricePolicyStorage[segmentCode][flightNumber][date]) {
-                cabinPricePolicyStorage[segmentCode][flightNumber][date] = {};
+            if (isEditLocked()) {
+                window.top.message.warning("另一个窗口正在编辑，请稍后再试");
+                return;
             }
 
-            cabinPricePolicyStorage[segmentCode][flightNumber][date][cabin] = newPrice;
+            setEditLock();
 
-            saveToSessionStorage('cabinPricePolicyStorage', cabinPricePolicyStorage);
-        }
+            try {
+                const storage = getCabinPricePolicyStorage();
+                const segmentCode = segment.substring(0, 6);
 
-        function getCabinPricePolicy(flightNumber, date, segment) {
-            const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
-            const segmentCode = segment.substring(0, 6);
-            return cabinPricePolicyStorage[segmentCode]?.[flightNumber]?.[date] || null;
-        }
+                if (!storage[segmentCode]) storage[segmentCode] = {};
+                if (!storage[segmentCode][flightNumber]) storage[segmentCode][flightNumber] = {};
+                if (!storage[segmentCode][flightNumber][date]) storage[segmentCode][flightNumber][date] = {};
 
-        function clearCabinPricePolicyStorage() {
-            saveToSessionStorage('cabinPricePolicyStorage', {});
+                storage[segmentCode][flightNumber][date][cabin] = newPrice;
+                saveCabinPricePolicyStorage(storage);
+                console.log(`Updated price for ${segmentCode} ${flightNumber} ${date} ${cabin}: ${newPrice}`);
+            } catch (error) {
+                console.error('Error updating cabin price policy:', error);
+                window.top.message.error("更新舱位价格策略时出错");
+            } finally {
+                releaseEditLock();
+            }
         }
 
         function fetchInitialCellValues() {
@@ -2476,7 +2526,8 @@
             }
         }
 
-        function addBatchButton() {
+        async function addBatchButton() {
+
             const targetModal = core.$('.react-draggable .ant-modal-content');
             if (!targetModal) return;
 
@@ -2489,63 +2540,64 @@
             batchButton.style.marginRight = '20px';
             batchButton.innerHTML = '<span>批量添加</span>';
 
-            batchButton.addEventListener('click', async () => {
-                const applyReasonTextarea = targetModal.querySelector('#basic_applyReason');
-                if (applyReasonTextarea) {
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-                    const inputEvent = new Event('input', { bubbles: true });
-                    nativeInputValueSetter.call(applyReasonTextarea, '跟进CA、CZ、MU');
-                    applyReasonTextarea.dispatchEvent(inputEvent);
+            batchButton.addEventListener('click', handleBatchAddClick);
+            addNextStepButtonListener();
+
+            container.appendChild(batchButton);
+        }
+
+        async function handleBatchAddClick() {
+            const targetModal = core.$('.react-draggable .ant-modal-content');
+            if (!targetModal) {
+                console.error('未找到目标模态框');
+                return;
+            }
+
+            const applyReasonTextarea = targetModal.querySelector('#basic_applyReason');
+            if (applyReasonTextarea) {
+                await uiOperations.fillTextArea('#basic_applyReason', '跟进CA、CZ、MU');
+            }
+
+            const tableBody = targetModal.querySelector('.ant-table-tbody');
+            if (!tableBody) {
+                console.error('未找到表格的tbody');
+                return;
+            }
+
+            const cabinPricePolicyStorage = getCabinPricePolicyStorage();
+            let totalUpdates = 0;
+            let failedUpdates = 0;
+
+            if (Object.keys(cabinPricePolicyStorage).length > 0) {
+                const firstRowCheckbox = tableBody.querySelector('.ant-table-row.ant-table-row-level-0 .ant-table-cell.ant-table-selection-column input[type="checkbox"]');
+                if (firstRowCheckbox) {
+                    firstRowCheckbox.click();
+                    await core.delay(200); // 等待复选框状态更新
                 }
 
-                const tableBody = targetModal.querySelector('.ant-table-tbody');
-                if (!tableBody) {
-                    console.error('未找到表格的tbody');
-                    return;
-                }
-
-                const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
-                let totalUpdates = 0;
-                let failedUpdates = 0;
-
-                // 只有当有数据需要更新时才点击第一行的 checkbox
-                if (Object.keys(cabinPricePolicyStorage).length > 0) {
-                    const firstRowCheckbox = tableBody.querySelector('.ant-table-row.ant-table-row-level-0 .ant-table-cell.ant-table-selection-column input[type="checkbox"]');
-                    if (firstRowCheckbox) {
-                        firstRowCheckbox.click();
-                    }
-
-                    for (const segment in cabinPricePolicyStorage) {
-                        for (const flightNumber in cabinPricePolicyStorage[segment]) {
-                            for (const date in cabinPricePolicyStorage[segment][flightNumber]) {
-                                for (const cabin in cabinPricePolicyStorage[segment][flightNumber][date]) {
-                                    const price = cabinPricePolicyStorage[segment][flightNumber][date][cabin];
-                                    try {
-                                        await addNewRow(tableBody, {
-                                            segment,
-                                            flightNumber,
-                                            date,
-                                            cabin,
-                                            price
-                                        });
-                                        totalUpdates++;
-                                    } catch (error) {
-                                        console.error(`添加行失败: ${segment} ${flightNumber} ${date} ${cabin}`, error);
-                                        failedUpdates++;
-                                    }
+                for (const segment in cabinPricePolicyStorage) {
+                    for (const flightNumber in cabinPricePolicyStorage[segment]) {
+                        for (const date in cabinPricePolicyStorage[segment][flightNumber]) {
+                            for (const cabin in cabinPricePolicyStorage[segment][flightNumber][date]) {
+                                const price = cabinPricePolicyStorage[segment][flightNumber][date][cabin];
+                                try {
+                                    await addNewRow(tableBody, { segment, flightNumber, date, cabin, price });
+                                    totalUpdates++;
+                                    await core.delay(200); // 在每次添加行后增加延迟，确保UI更新
+                                } catch (error) {
+                                    console.error(`添加行失败: ${segment} ${flightNumber} ${date} ${cabin}`, error);
+                                    failedUpdates++;
                                 }
                             }
                         }
                     }
                 }
+            }
 
-                console.log(`添加了 ${totalUpdates} 个舱位价格更新到表格中`);
-
-            });
-
-            addNextStepButtonListener();
-
-            container.appendChild(batchButton);
+            console.log(`添加了 ${totalUpdates} 个舱位价格更新到表格中, ${failedUpdates} 个失败`);
+            if (failedUpdates > 0) {
+                window.top.message.warning(`${failedUpdates} 个舱位价格更新失败，请检查日志`);
+            }
         }
 
         function addNextStepButtonListener() {
@@ -2555,19 +2607,12 @@
                 return;
             }
 
-            const buttons = modalContent.querySelectorAll('button.ant-btn.ant-btn-primary');
-            let nextStepButton = null;
-
-            for (const button of buttons) {
-                if (button.textContent.trim() === '下一步') {
-                    nextStepButton = button;
-                    break;
-                }
-            }
+            const nextStepButton = Array.from(modalContent.querySelectorAll('button.ant-btn.ant-btn-primary'))
+            .find(button => button.textContent.trim() === '下一步');
 
             if (nextStepButton) {
                 nextStepButton.addEventListener('click', () => {
-                    clearCabinPricePolicyStorage();
+                    localStorage.removeItem(STORAGE_KEY);
                     console.log('已清空 cabinPricePolicyStorage');
                 });
             } else {
@@ -2583,45 +2628,23 @@
             }
 
             copyAddButton.click();
-            await new Promise(resolve => setTimeout(resolve, 300));
+            await core.delay(300);
 
             const newRow = tableBody.querySelector('.ant-table-row.ant-table-row-level-0:last-child');
             const cells = newRow.querySelectorAll('.ant-table-cell');
 
-            await updateCell(cells[3], data.segment.substring(0, 3));
-            await updateCell(cells[4], data.segment.substring(3, 6));
-            await updateCell(cells[5], data.flightNumber);
-            await updateCell(cells[7], data.cabin);
-            await updateCell(cells[8], data.price.toString());
-            await updateCell(cells[9], data.date);
-            await updateCell(cells[10], data.date);
+            await uiOperations.updateTableCell(cells[3], data.segment.substring(0, 3));
+            await uiOperations.updateTableCell(cells[4], data.segment.substring(3, 6));
+            await uiOperations.updateTableCell(cells[5], data.flightNumber);
+            await uiOperations.updateTableCell(cells[7], data.cabin);
+            await uiOperations.updateTableCell(cells[8], data.price.toString());
+            await uiOperations.updateTableCell(cells[9], data.date);
+            await uiOperations.updateTableCell(cells[10], data.date);
 
             const newRowCheckbox = newRow.querySelector('.ant-table-cell.ant-table-selection-column input[type="checkbox"]');
             if (newRowCheckbox) {
                 newRowCheckbox.checked = false;
                 newRowCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
-
-        async function updateCell(cell, newValue) {
-            const editableDiv = cell.querySelector('.editable-cell-value-wrap');
-            if (!editableDiv) {
-                console.error('未找到 .editable-cell-value-wrap 元素');
-                return;
-            }
-
-            const dblClickEvent = new MouseEvent('dblclick', { bubbles: true });
-            editableDiv.dispatchEvent(dblClickEvent);
-
-            await new Promise(resolve => setTimeout(resolve, 300));
-
-            const input = cell.querySelector('input, textarea, [contenteditable="true"]');
-            if (input) {
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                nativeInputValueSetter.call(input, newValue);
-
-                const inputEvent = new Event('input', { bubbles: true });
-                input.dispatchEvent(inputEvent);
             }
         }
 
@@ -2639,9 +2662,7 @@
                 if (firstCell && !firstCell.dataset.doubleClickBound && seventhCell && seventhCell.querySelector('input[type="checkbox"]')) {
                     firstCell.dataset.oldValue = firstCell.textContent.trim();
                     firstCell.dataset.doubleClickBound = 'true';
-                    firstCell.addEventListener('dblclick', function() {
-                        makeCellEditable(firstCell);
-                    });
+                    firstCell.addEventListener('dblclick', () => makeCellEditable(firstCell));
                 }
             }
         }
@@ -2659,7 +2680,7 @@
             cell.appendChild(input);
             input.focus();
 
-            input.addEventListener('blur', function() {
+            input.addEventListener('blur', () => {
                 const newValue = input.value.trim();
                 if (newValue !== (price || '')) {
                     updateCellValue(cell, cabin, newValue);
@@ -2667,7 +2688,7 @@
                     cell.textContent = currentText;
                 }
             });
-            input.addEventListener('keydown', function(event) {
+            input.addEventListener('keydown', (event) => {
                 if (event.key === "Enter") {
                     input.blur();
                 }
@@ -2685,10 +2706,9 @@
             const date = state.initialValues.secondCell.replace(/-/g, '/');
             const segment = state.initialValues.tabPane.substring(0, 6);
 
-            // 验证输入是否为有效的数字
             if (!/^\d+$/.test(newPrice)) {
                 window.top.message.error("请输入正确的价格");
-                cell.textContent = oldValue; // 恢复原始值
+                cell.textContent = oldValue;
                 return;
             }
 
@@ -2698,17 +2718,15 @@
 
             const newCellContent = cabin + price.toString();
             cell.textContent = newCellContent;
-            cell.style.color = 'red'; // 标记已修改的价格
-            cell.style.fontWeight = 'bold'; // 加粗文本
+            cell.style.color = 'red';
+            cell.style.fontWeight = 'bold';
         }
 
         function updateInitialPrices() {
-            const cabinPricePolicyStorage = initializeOrGetCabinPricePolicyStorage();
+            const cabinPricePolicyStorage = getCabinPricePolicyStorage();
 
             const targetElement = core.$('#cabin-control-id .ant-table-tbody');
-            if (!targetElement) {
-                return;
-            }
+            if (!targetElement) return;
 
             if (!state.initialValues.firstCell || !state.initialValues.secondCell || !state.initialValues.tabPane) return;
 
@@ -2730,8 +2748,8 @@
                     const cabin = cabinCell.textContent.trim();
                     if (priceData[cabin]) {
                         cabinCell.textContent = cabin + priceData[cabin];
-                        cabinCell.style.color = 'red'; // 标记已修改的价格
-                        cabinCell.style.fontWeight = 'bold'; // 加粗文本
+                        cabinCell.style.color = 'red';
+                        cabinCell.style.fontWeight = 'bold';
                     }
                 }
             });
@@ -2740,72 +2758,63 @@
         // 公共接口
         return {
             init: function() {
+                if (!core.isFeatureEnabled("k_bulkCabinChange")) return;
                 fetchInitialCellValues();
                 updateInitialPrices();
                 addDoubleClickHandler();
                 addBatchButton();
             },
-            getCabinPricePolicy: getCabinPricePolicy,
-            clearCabinPricePolicyStorage: clearCabinPricePolicyStorage
+            getCabinPricePolicy: function(flightNumber, date, segment) {
+                const storage = getCabinPricePolicyStorage();
+                const segmentCode = segment.substring(0, 6);
+                return storage[segmentCode]?.[flightNumber]?.[date] || null;
+            },
+            clearCabinPricePolicyStorage: function() {
+                sessionStorage.removeItem(STORAGE_KEY);
+            }
         };
     });
 
-    ModuleSystem.define('batchAVJ', ['core', 'state'], function(core, state) {
+    ModuleSystem.define('batchAVJ', ['core', 'state', 'uiOperations', 'dataEventManager'], function(core, state, uiOperations, dataEventManager) {
+        // 检查功能是否启用
+        if (!core.isFeatureEnabled("k_batchavjlong")) {
+            console.log('批量 AVJ 功能未启用');
+            return { init: function() {} }; // 返回空的初始化函数
+        }
+
         let fetchExecuted = false;
         const addedUsers = new Set();
 
-        function removeElement() {
-            const elementToRemove = core.$("div.ant-col.ant-col-2[style='padding-top: 5px;']");
-            if (elementToRemove) {
-                elementToRemove.remove();
-            }
+        function createLabel() {
+            const label = document.createElement('div');
+            label.className = "ant-col ant-col-1 ant-form-item-label";
+            label.innerHTML = '<label for="select_user" class="ant-form-item-required" title="航管">航管</label>';
+            return label;
         }
 
-        function modifyExistingElement() {
-            const existingElement = core.$("div.ant-col.ant-col-4[style='padding-top: 5px;']");
-            if (existingElement) {
-                existingElement.className = "ant-col ant-col-3";
-            }
-        }
-
-        function addNewElement1(rowContainer) {
-            const newElement1 = document.createElement('div');
-            newElement1.className = "ant-col ant-col-1 ant-form-item-label";
-            newElement1.innerHTML = `
-        <label for="select_user" class="ant-form-item-required" title="航管">航管</label>
-    `;
-            rowContainer.appendChild(newElement1);
-        }
-
-        function addNewElement2(rowContainer) {
-            const newElement2 = document.createElement('div');
-            newElement2.className = "ant-col ant-col-2 ant-form-item-control";
-            newElement2.innerHTML = `
-        <div class="ant-form-item-control-input">
-            <div class="ant-form-item-control-input-content">
-                <div id="select_container"></div>
+        function createSelectContainer() {
+            const container = document.createElement('div');
+            container.className = "ant-col ant-col-2 ant-form-item-control";
+            container.innerHTML = `
+            <div class="ant-form-item-control-input">
+                <div class="ant-form-item-control-input-content">
+                    <div id="select_container"></div>
+                </div>
             </div>
-        </div>
-    `;
-            rowContainer.appendChild(newElement2);
-
-            setupAntSelect();
+        `;
+            return container;
         }
 
-        function addBatchQueryButton(rowContainer) {
-            const queryButtonContainer = core.$("div.ant-col.ant-col-1");
-            if (queryButtonContainer && !document.querySelector("#batchQueryButton")) {
-                const batchQueryButtonContainer = queryButtonContainer.cloneNode(true);
-                batchQueryButtonContainer.className = "ant-col ant-col-2";
-
-                const batchQueryButton = batchQueryButtonContainer.querySelector("button.ant-btn.ant-btn-primary");
-                batchQueryButton.id = "batchQueryButton";
-                batchQueryButton.querySelector("span:last-child").textContent = "批量查询";
-
-                rowContainer.appendChild(batchQueryButtonContainer);
-
-                batchQueryButton.addEventListener('click', handleBatchQuery);
-            }
+        function createBatchQueryButton() {
+            const container = document.createElement('div');
+            container.className = "ant-col ant-col-2";
+            const button = document.createElement('button');
+            button.id = "batchQueryButton";
+            button.className = "ant-btn ant-btn-primary";
+            button.innerHTML = '<span>批量查询</span>';
+            button.addEventListener('click', handleBatchQuery);
+            container.appendChild(button);
+            return container;
         }
 
         function setupAntSelect() {
@@ -2825,94 +2834,15 @@
             }
         }
 
-        function executeFetchAndPopulateSelect(select) {
-            const { startFltDate, endFltDate } = getDateValues();
-            const userInfo = state.userInfo;
-            const { token: authorizationToken } = userInfo;
-
-            fetch(`http://sfm.hnair.net/sfm-admin/sys/sysfltseguser/listCurrent?page=1&limit=99999&startFltDate=${startFltDate}&endFltDate=${endFltDate}&attrType=%E5%9B%BD%E5%86%85`, {
-                "headers": {
-                    "accept": "application/json, text/plain, */*",
-                    "request-starttime": Date.now(),
-                    "x-authorization": authorizationToken,
-                },
-                "referrerPolicy": "strict-origin-when-cross-origin",
-                "body": null,
-                "method": "GET",
-                "mode": "cors",
-                "credentials": "include"
-            }).then(response => response.json())
-                .then(data => {
-                console.log("fetch结果:", data);
-                const list = data.obj.list;
-                sessionStorage.setItem('fltNosData', JSON.stringify(list));
-                const options = list.map(item => ({
-                    username: item.username,
-                    account: item.account,
-                    userId: item.userId,
-                }));
-                addOptionsToSelect(select, options);
-            })
-                .catch(error => console.error("fetch发生错误:", error));
-        }
-
-        async function handleSelectClick(selectedValue) {
-
-            // 读取 sessionStorage 中的 fltNosResults
-            const fltNosResults = JSON.parse(sessionStorage.getItem('fltNosResults')) || [];
-            const existingResult = fltNosResults.find(item => item.userId.toString() === selectedValue);
-
-            if (existingResult) {
-                console.log("已经存在相同userId的数据，无需重新fetch");
-                return;
-            }
-
-            // 读取 sessionStorage 的 fltNosData
-            const fltNosData = JSON.parse(sessionStorage.getItem('fltNosData')) || [];
-            const userSpecificData = fltNosData.filter(item => item.userId.toString() === selectedValue);
-
-            // 构造用户信息
-            const userInfo = userSpecificData.map(item => ({
-                userId: item.userId,
-                account: item.account,
-                username: item.username,
-                origin: item.origin,
-                dest: item.dest,
-                airRoute: item.airRoute
-            }));
-
-            console.log("用户信息:", userInfo);
-
-            // 根据 origin 和 dest 执行 fetch 获取 fltNos
-            const fetchPromises = userInfo.map(async user => {
-                const seg = `${user.origin}${user.dest}`;
+        async function executeFetchAndPopulateSelect(select) {
+            try {
                 const { startFltDate, endFltDate } = getDateValues();
-                const userInfo = state.userInfo;
-                const { token: authorizationToken } = userInfo;
-                const url = `http://sfm.hnair.net/sfm-admin/rtquery/longcmd/fltno?seg=${seg}&fltDateStart=${startFltDate}&fltDateEnd=${endFltDate}`;
-
-                const response = await fetch(url, {
-                    headers: {
-                        "accept": "application/json, text/plain, */*",
-                        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-                        "x-authorization": authorizationToken
-                    },
-                    referrerPolicy: "strict-origin-when-cross-origin",
-                    method: "GET",
-                    mode: "cors",
-                    credentials: "include"
-                });
-
-                const data = await response.json();
-                user.fltNos = data.obj; // 假设返回的数据结构中包含一个 obj 字段
-                return user;
-            });
-
-            // 等待所有 fetch 请求完成
-            const results = await Promise.all(fetchPromises);
-            fltNosResults.push(...results);
-            sessionStorage.setItem('fltNosResults', JSON.stringify(fltNosResults));
-            console.log("已更新 sessionStorage 中的 fltNosResults:", fltNosResults);
+                const options = await dataEventManager.fetchUserList(startFltDate, endFltDate);
+                addOptionsToSelect(select, options);
+            } catch (error) {
+                console.error("获取用户列表失败:", error);
+                window.top.message.error("获取用户列表失败，请重试");
+            }
         }
 
         function addOptionsToSelect(select, options) {
@@ -2946,7 +2876,6 @@
         async function handleBatchQuery() {
             console.log("批量查询按钮被点击");
 
-            // 获取 select_user 的当前选择值并输出到控制台
             const selectUser = core.$('#select_user');
             const selectedValue = selectUser ? selectUser.value : null;
             console.log("当前选择的值:", selectedValue);
@@ -2956,99 +2885,75 @@
                 return;
             }
 
-            await handleSelectClick(selectedValue);
+            try {
+                await dataEventManager.handleSelectClick(selectedValue);
+                await updateSegInput();
+                await updateFltNosInput();
+                clickQueryButton();
+            } catch (error) {
+                console.error("批量查询过程中发生错误:", error);
+                window.top.message.error("批量查询失败，请重试");
+            }
+        }
 
-            // 给 seg 输入框赋值并触发 change 事件
-            const segInput = document.querySelector("input#seg[placeholder='请填写']");
+        async function updateSegInput() {
+            const segInput = core.$("input#seg[placeholder='请填写']");
+            if (!segInput) return;
 
-            if (segInput) {
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                nativeInputValueSetter.call(segInput, "");
+            await uiOperations.fillInput("input#seg[placeholder='请填写']", "");
+            await uiOperations.fillInput("input#seg[placeholder='请填写']", "ALLSEG");
+        }
 
-                const inputEvent = new Event('input', { bubbles: true });
-                segInput.dispatchEvent(inputEvent);
+        async function updateFltNosInput() {
+            const fltNosInputWrapper = core.$("#fltNos .ant-select-selection-search-input");
+            if (!fltNosInputWrapper) return;
 
-                const changeEvent = new Event('change', { bubbles: true });
-                segInput.dispatchEvent(changeEvent);
+            fltNosInputWrapper.removeAttribute('readonly');
+            fltNosInputWrapper.removeAttribute('unselectable');
+            fltNosInputWrapper.style.opacity = 1;
+
+            fltNosInputWrapper.focus();
+            fltNosInputWrapper.click();
+
+            await core.delay(100);
+
+            await uiOperations.fillInput("#fltNos .ant-select-selection-search-input", "ALLSEG");
+
+            await core.delay(500);
+
+            const dropdown = core.$(".ant-select-dropdown");
+            if (dropdown) {
+                const option = Array.from(dropdown.querySelectorAll('.ant-select-item-option-content'))
+                .find(el => el.textContent.includes("ALLSEG"));
+                if (option) option.click();
             }
 
-            if (segInput) {
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                nativeInputValueSetter.call(segInput, "ALLSEG");
+            fltNosInputWrapper.dispatchEvent(new Event('blur', { bubbles: true }));
 
-                const inputEvent = new Event('input', { bubbles: true });
-                segInput.dispatchEvent(inputEvent);
+            const fltNosWrapper = core.$("#fltNos");
+            if (fltNosWrapper) fltNosWrapper.click();
+        }
 
-                const changeEvent = new Event('change', { bubbles: true });
-                segInput.dispatchEvent(changeEvent);
-            }
+        function clickQueryButton() {
+            const queryButton = Array.from(core.$$("button.ant-btn.ant-btn-primary"))
+            .find(button => button.textContent.includes("查询"));
 
-            // 延迟1秒再处理 fltNosInput
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            // 使用 Ant Design 的 API 给 fltNos 赋值
-            const fltNosInputWrapper = document.querySelector("#fltNos .ant-select-selection-search-input");
-            if (fltNosInputWrapper) {
-                fltNosInputWrapper.removeAttribute('readonly');
-                fltNosInputWrapper.removeAttribute('unselectable');
-                fltNosInputWrapper.style.opacity = 1;
-
-                // 模拟用户点击输入框
-                fltNosInputWrapper.focus();
-                fltNosInputWrapper.click();
-
-                // 延迟100毫秒以确保输入框激活
-                await new Promise(resolve => setTimeout(resolve, 100));
-
-                // 使用原生输入值的方法
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                nativeInputValueSetter.call(fltNosInputWrapper, "ALLSEG");
-
-                // 创建和分发 input 事件
-                const inputEvent = new Event('input', { bubbles: true });
-                fltNosInputWrapper.dispatchEvent(inputEvent);
-
-                // 延迟100毫秒以确保事件处理
-                await new Promise(resolve => setTimeout(resolve, 500));
-
-                // 触发下拉菜单的打开
-                const dropdown = document.querySelector(".ant-select-dropdown");
-                if (dropdown) {
-                    // 查找下拉菜单中的选项
-                    const option = Array.from(dropdown.querySelectorAll('.ant-select-item-option-content')).find(el => el.textContent.includes("ALLSEG"));
-                    if (option) {
-                        option.click();
-                    }
-                }
-
-                // 模拟失去焦点事件
-                const blurEvent = new Event('blur', { bubbles: true });
-                fltNosInputWrapper.dispatchEvent(blurEvent);
-
-                // 手动触发下拉菜单关闭
-                const fltNosWrapper = document.querySelector("#fltNos");
-                if (fltNosWrapper) {
-                    fltNosWrapper.click(); // 再次点击外层元素关闭下拉菜单
-                }
-            }
-
-            // 查找并点击指定按钮
-            const buttons = document.querySelectorAll("button.ant-btn.ant-btn-primary");
-            let found = false;
-
-            buttons.forEach(button => {
-                const span = button.querySelector("span:last-child");
-                if (span && span.textContent === "查询") {
-                    button.click();
-                    console.log("查询按钮被点击");
-                    found = true;
-                }
-            });
-
-            if (!found) {
+            if (queryButton) {
+                queryButton.click();
+                console.log("查询按钮被点击");
+            } else {
                 console.log("查询按钮未找到");
             }
+        }
 
+        async function setInputValue(input, value) {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeInputValueSetter.call(input, value);
+
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+
+            await core.delay(100);
         }
 
         function getDateValues() {
@@ -3063,20 +2968,126 @@
 
         function init() {
             const formElement = core.$("form.ant-form.ant-form-horizontal");
-            if (formElement) {
-                const rowContainer = core.$("div.ant-row[style='padding: 0px 24px;']");
-                if (rowContainer && !document.querySelector("#batchQueryButton")) {
-                    removeElement();
-                    modifyExistingElement();
-                    addNewElement1(rowContainer);
-                    addNewElement2(rowContainer);
-                    addBatchQueryButton(rowContainer);
-                }
-            }
+            if (!formElement) return;
+
+            const rowContainer = core.$("div.ant-row[style='padding: 0px 24px;']");
+            if (!rowContainer || document.querySelector("#batchQueryButton")) return;
+
+            const elementToRemove = core.$("div.ant-col.ant-col-2[style='padding-top: 5px;']");
+            if (elementToRemove) elementToRemove.remove();
+
+            const existingElement = core.$("div.ant-col.ant-col-4[style='padding-top: 5px;']");
+            if (existingElement) existingElement.className = "ant-col ant-col-3";
+
+            rowContainer.appendChild(createLabel());
+            rowContainer.appendChild(createSelectContainer());
+            rowContainer.appendChild(createBatchQueryButton());
+
+            setupAntSelect();
         }
 
         return {
             init: init
+        };
+    });
+
+    ModuleSystem.define('tableFilterModule', ['core', 'state'], function(core, state) {
+        // 私有变量和函数
+        const DEBOUNCE_DELAY = 1000;
+
+        function isDateInRange(date, startDate, endDate) {
+            return date >= startDate && date <= endDate;
+        }
+
+        function getSegmentsInfo() {
+            const selectElement = core.$('#select_user');
+            const selectedValue = selectElement ? selectElement.value : null;
+            console.log("获取到当前点击的用户是:", selectedValue);
+
+            const fltNosResults = JSON.parse(sessionStorage.getItem('fltNosResults')) || [];
+            console.log("fltNosResults:", fltNosResults);
+            const userSpecificData = fltNosResults.filter(item => item.userId.toString() === selectedValue);
+            console.log("userSpecificData:", userSpecificData);
+
+            const uniqueSegmentsSet = new Set(userSpecificData.map(item => `${item.origin}${item.dest}`));
+            const segmentsInfo = Array.from(uniqueSegmentsSet);
+            console.log("Unique segmentsInfo:", segmentsInfo);
+
+            return segmentsInfo;
+        }
+
+        function filterTableRows() {
+            const startDate = core.$(`input[placeholder="开始日期"]`).value;
+            const endDate = core.$(`input[placeholder="结束日期"]`).value;
+            const segmentValue = core.$(`input#seg`).value;
+            const segmentsInfo = getSegmentsInfo();
+            console.log("segmentsInfo:", segmentsInfo);
+
+            if (!startDate || !endDate || !segmentValue) {
+                console.warn("无法获取开始日期、结束日期或航段值");
+                return;
+            }
+
+            const tbody = core.$('tbody.ant-table-tbody');
+            if (tbody) {
+                const rows = tbody.querySelectorAll('tr[data-row-key]');
+
+                rows.forEach(row => {
+                    const dateCell = row.querySelector('td.ant-table-cell:first-child');
+                    const segmentCell = row.querySelector('td.ant-table-cell:nth-child(2)');
+
+                    if (!dateCell || !segmentCell) {
+                        console.warn("无法找到日期单元格或航段单元格");
+                        return;
+                    }
+
+                    const date = dateCell.textContent.trim();
+                    const segment = segmentCell.textContent.trim();
+
+                    let shouldRemove = !isDateInRange(date, startDate, endDate);
+
+                    if (segmentValue.toUpperCase() === "ALLSEG") {
+                        shouldRemove = shouldRemove || !segmentsInfo.includes(segment.toUpperCase());
+                    } else {
+                        shouldRemove = shouldRemove || (segment.toUpperCase() !== segmentValue.toUpperCase());
+                    }
+
+                    if (shouldRemove) {
+                        console.log('删除了不符合的行:', row);
+                        row.remove();
+                    }
+                });
+            }
+        }
+
+        const observeTableChanges = core.debounce(() => {
+            const fltNosWrapper = core.$('#fltNos');
+            if (!fltNosWrapper) return;
+
+            const formElement = core.$('form.ant-form.ant-form-horizontal');
+            if (formElement) {
+                const tbody = core.$('tbody.ant-table-tbody');
+                if (tbody) {
+                    const observer = new MutationObserver((mutations) => {
+                        const hasAddedNodes = mutations.some(mutation => mutation.addedNodes.length > 0);
+                        if (hasAddedNodes) {
+                            console.log('找到了表格元素并开启监控');
+                            filterTableRows();
+                            observer.disconnect();
+                        }
+                    });
+                    observer.observe(tbody, { childList: true, subtree: true });
+                }
+            }
+        }, DEBOUNCE_DELAY);
+
+        // 公共接口
+        return {
+            init: function() {
+                // 这里可以添加任何需要在模块初始化时执行的代码
+                console.log('Table Filter Module initialized');
+            },
+            observeTableChanges: observeTableChanges
         };
     });
 
@@ -3417,8 +3428,8 @@
         };
     });
 
-    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'longInstruction', 'enhanceUI', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ', 'elementObserver', 'tooltipObserver'],
-                        function(core, state, menuManager, indicesManager, longInstruction, enhanceUI, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, elementObserver, tooltipObserver) {
+    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'longInstruction', 'enhanceUI', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver'],
+                        function(core, state, menuManager, indicesManager, longInstruction, enhanceUI, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver) {
 
         function loadDefaultAction() {
             // 初始化其他不依赖 MutationObserver 的模块...
@@ -3437,11 +3448,10 @@
                     dataEventManager.init(mutations);
                     excludeFlight.fillExcludeForm();
                     batchPolicy.init();
+                    tableFilterModule.observeTableChanges();
                     batchAVJ.init();
                     elementObserver.observeElements(mutations);
                     tooltipObserver.observeTooltips(mutations);
-                    //priceDisplay.observerInit(mutations);
-                    // 调用其他依赖 MutationObserver 的模块的初始化函数...
                 }
             });
 
