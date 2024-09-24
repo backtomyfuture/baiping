@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.1
+// @version           1.0.2
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -153,6 +153,20 @@
 - 优化功能：优化batchPolicy，使用localstorage来存储，避免多浏览器以及跨浏览器页签导致的数据错乱问题;
 - 新增功能：补充了tableFilterModule模块；
 
+## 版本 1.0.2
+### 2024-09-19
+- 优化功能：优化了indicesManager代码，新增了calculateIndices功能；
+- 优化功能：优化了elementObserver代码，重新梳理了整个逻辑，简化了代码；
+
+### 2024-09-23
+- 优化功能：优化enhanceUIWithContextMenu，也把其中的观察时间提取出来，放到elementObserver中；
+- 优化功能：优化待优化tooltipObserver，更改了整个页面观察的逻辑；
+
+### 2024-09-24
+- 优化功能：优化点击调舱的时候，面板也会触发elementObserver,增加判断条件排除掉；
+- 优化功能：修复enhanceUIWithContextMenu中的bug，讲判断条件放到addCustomContextMenu中；
+- 优化功能：修复了processPriceDiffData中targetFlight参数的bug；
+- 新增功能：新增了CN航班价差信息。
 
 
 */
@@ -294,6 +308,13 @@
                 checkbutton: 'checkbutton',
                 checked: 'checked',
                 batchAddButton: 'batch-add-button'
+            },
+
+            ELEMENT_TYPES: {
+                DATE_FLIGHT: 'dateFlight',
+                ECONOMIC_PRICE: 'economicPrice',
+                BUSINESS_PRICE: 'businessPrice',
+                OTHER: 'other'
             },
 
             // 菜单项配置
@@ -481,8 +502,8 @@
         // 私有变量
         let _cachedUserInfo = null;
         let _globalIndices = null;
-        let _currentDateFlightElement = null;
-        let _currentPriceElement = null;
+        let _currentElementType = null;
+        let _currentFlightInfo = null;
         let _priceList = null;
         let _currentMenuId = null;
         const _requestCache = new Map();
@@ -512,19 +533,23 @@
                 _globalIndices = indices;
             },
 
-            // 3. 频繁变化的数据
-            get currentDateFlightElement() {
-                return _currentDateFlightElement;
+            get currentFlightInfo() {
+                const storedInfo = sessionStorage.getItem('currentFlightInfo');
+                return storedInfo ? JSON.parse(storedInfo) : null;
             },
-            set currentDateFlightElement(element) {
-                _currentDateFlightElement = element;
+            set currentFlightInfo(info) {
+                if (info) {
+                    sessionStorage.setItem('currentFlightInfo', JSON.stringify(info));
+                } else {
+                    sessionStorage.removeItem('currentFlightInfo');
+                }
             },
 
-            get currentPriceElement() {
-                return _currentPriceElement;
+            get currentElementType() {
+                return _currentElementType;
             },
-            set currentPriceElement(element) {
-                _currentPriceElement = element;
+            set currentElementType(type) {
+                _currentElementType = type;
             },
 
             get priceList() {
@@ -571,8 +596,8 @@
             resetAll: function() {
                 _cachedUserInfo = null;
                 _globalIndices = null;
-                _currentDateFlightElement = null;
-                _currentPriceElement = null;
+                _currentFlightInfo = null;
+                _currentElementType = null;
                 _priceList = null;
                 _currentMenuId = null;
                 _requestCache.clear();
@@ -708,7 +733,7 @@
                     editableDiv.dispatchEvent(dblClickEvent);
 
                     setTimeout(() => {
-                        const input = cell.querySelector('input');
+                        const input = cell.querySelector('input, textarea, [contenteditable="true"]')
                         if (!input) {
                             reject(new Error('未找到输入元素'));
                             return;
@@ -1223,10 +1248,21 @@
             });
         }
 
+        // 提取共用的索引计算逻辑
+        const calculateIndices = function(isFirstCellSpecial) {
+            const { dateFlightIndex_origin, economicPriceIndex_origin, businessPriceIndex_origin } = state.globalIndices;
+            return {
+                dateFlightIndex: isFirstCellSpecial ? dateFlightIndex_origin : dateFlightIndex_origin - 1,
+                economicPriceIndex: isFirstCellSpecial ? economicPriceIndex_origin : economicPriceIndex_origin - 1,
+                businessPriceIndex: isFirstCellSpecial ? businessPriceIndex_origin : businessPriceIndex_origin - 1
+            };
+        }
+
         return {
             init: function() {
                 initObserver();
-            }
+            },
+            calculateIndices: calculateIndices,
         };
     });
 
@@ -1517,6 +1553,10 @@
 
     ModuleSystem.define('enhanceUI', ['core'], function(core) {
 
+        if (!core.isFeatureEnabled("k_interfaceOptimization")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
+
         function moveButton() {
             const refreshButton = core.$('#refresh');
             const container = core.$('.ant-col-9 .ant-row.ant-form-item-row .ant-form-item-control-input .ant-space');
@@ -1536,27 +1576,45 @@
 
         return {
             init: function() {
-                if (core.isFeatureEnabled("k_interfaceOptimization")) {
-                    moveButton();
-                    removeButton();
-                }
+                moveButton();
+                removeButton();
             }
         };
     });
 
-    ModuleSystem.define('enhanceUIWithContextMenu', ['core', 'state'], function(core, state) {
+    ModuleSystem.define('enhanceUIWithContextMenu', ['core', 'state', 'indicesManager'], function(core, state, indicesManager) {
+
+        if (!core.isFeatureEnabled("k_interfaceOptimization")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
 
         function addCustomContextMenu() {
             const refreshElement = core.$('#refresh');
             const leftTargetElement = core.$('#cabin-control-id');
             const rightTargetElement = core.$('.art-table');
 
-            if (refreshElement && leftTargetElement && !leftTargetElement.dataset.customMenuAdded) {
+            if ( leftTargetElement && !leftTargetElement.dataset.customMenuAdded) {
                 setupContextMenu(leftTargetElement, 'left');
             }
 
             if (refreshElement && rightTargetElement && !rightTargetElement.dataset.customMenuAdded) {
-                setupContextMenu(rightTargetElement, 'right');
+                const currentFlightInfo = state.currentFlightInfo
+
+                // 检查当前航班信息是否存在
+                if (!currentFlightInfo || !currentFlightInfo.flightNumber) {
+                    //console.log('No current flight info available');
+                    return;
+                }
+
+                const targetAirCompany = currentFlightInfo.flightNumber.substring(0, 2);
+                const userInfo = state.userInfo;
+                const { airCompony } = userInfo;
+
+                // 检查航空公司是否匹配
+                if ((targetAirCompany === airCompony) || (airCompony === "HU" && targetAirCompany === "CN")) {
+                    setupContextMenu(rightTargetElement, 'right');
+                }
+
             }
         }
 
@@ -1567,18 +1625,10 @@
                 event.preventDefault();
                 removeAllCustomMenus();
 
-                if (side === 'right') {
-                    const currentFlightInfo = getFlightInfo(event);
-                    if (currentFlightInfo !== null) {
-                        sessionStorage.setItem('currentFlightInfo', JSON.stringify(currentFlightInfo));
-                    } else return;
-                }
-
                 const menuId = `${side}-menu-${Date.now()}`;
                 state.currentMenuId = menuId;
                 const menu = createContextMenu(event.pageX, event.pageY, menuId, side);
                 document.body.appendChild(menu);
-
             });
         }
 
@@ -1765,60 +1815,6 @@
             state.currentMenuId = null;
         }
 
-        function getFlightInfo(event) {
-            const target = event.target;
-            const row = target.closest('.art-table-row');
-            if (!row) return null;
-
-            const cells = row.querySelectorAll('.art-table-cell');
-            if (cells.length < 3) return null;
-
-            const isFirstCellSpecial = cells[0].classList.contains('first');
-
-            let { dateFlightIndex_origin } = state.globalIndices;
-
-            const dateFlightIndex = isFirstCellSpecial ? dateFlightIndex_origin : dateFlightIndex_origin - 1;
-
-            const dateFlightCell = cells[dateFlightIndex];
-            const dateFlightElement = dateFlightCell.querySelector('[id^="data-"]');
-            if (!dateFlightElement) return null;
-
-            const idParts = dateFlightElement.id.split('-');
-            const date = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
-            const flightNumber = idParts[4];
-
-            const filteredFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || 'null');
-
-            // 首先检查 filteredFlightList 是否为 null 或不是数组
-            if (!filteredFlightList || !Array.isArray(filteredFlightList)) {
-                console.log('filteredFlightList is null or not an array');
-                return null;
-            }
-
-            const userInfo = state.userInfo;
-            const { airCompony } = userInfo;
-
-            const matchedFlight = filteredFlightList.find(flight => {
-                if (airCompony === "HU") {
-                    return flight.fltDate.split(' ')[0] === date && flight.fltNo === flightNumber && (flight.fltNo.includes("HU") || flight.fltNo.includes("CN"));
-                } else {
-                    return flight.fltDate.split(' ')[0] === date && flight.fltNo === flightNumber && flight.fltNo.includes(airCompony);
-                }
-            });
-
-            if (!matchedFlight) return null;
-
-            const airRoute = matchedFlight.airRoute.replace(/-/g, '');
-
-            return {
-                date: date,
-                flightNumber: flightNumber,
-                segment: airRoute,
-                origin: matchedFlight.origin,
-                dest: matchedFlight.dest
-            };
-        }
-
         function simulateClick(item) {
             const topDocument = window.top.document;
             const moduleMenu = topDocument.querySelector(`div[data-menu-id="menu-id-/PriceDiff"]`);
@@ -1854,25 +1850,29 @@
 
         return {
             init: function() {
-                if (core.isFeatureEnabled("k_interfaceOptimization")) {
-                    addContextMenuStyles(); // 添加这一行
-                    addCustomContextMenu();
 
-                    // 添加全局点击事件监听器
-                    document.addEventListener('click', (e) => {
-                        if (state.currentMenuId) {
-                            const currentMenu = document.getElementById(state.currentMenuId);
-                            if (currentMenu && !currentMenu.contains(e.target)) {
-                                removeAllCustomMenus();
-                            }
+                addContextMenuStyles(); // 添加这一行
+                addCustomContextMenu();
+
+                // 添加全局点击事件监听器
+                document.addEventListener('click', (e) => {
+                    if (state.currentMenuId) {
+                        const currentMenu = document.getElementById(state.currentMenuId);
+                        if (currentMenu && !currentMenu.contains(e.target)) {
+                            removeAllCustomMenus();
                         }
-                    });
-                }
+                    }
+                });
             }
         };
     });
 
     ModuleSystem.define('dataEventManager', ['core', 'state'], function(core, state) {
+
+        if (!core.isFeatureEnabled("k_priceDisplay") && !core.isFeatureEnabled("k_syncDisplay") && !core.isFeatureEnabled("k_quickNavigation")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
+
         // 事件管理模块
         const eventManager = {
             init: function(mutations) {
@@ -1937,9 +1937,11 @@
                 }
                 if (core.isFeatureEnabled("k_priceDisplay")) {
                     dataFetcher.fetchPriceDifferenceData();
-                    state.currentDateFlightElement = null;
+                    state.currentElementType = null;
                     state.PriceList = null;
-                    state.currentPriceElement = null;
+                    state.currentFlightInfo = null;
+
+
                 }
                 if (core.isFeatureEnabled("k_syncDisplay")) {
                     dataFetcher.fetchSyncDateData();
@@ -2071,7 +2073,20 @@
                     const startFltDate = core.$('input[placeholder="开始日期"]').value;
                     const endFltDate = core.$('input[placeholder="结束日期"]').value;
 
-                    const allData = await this.fetchAllData(depCityCode, arrCityCode, startFltDate, endFltDate, airCompony, authorizationToken, xsrfToken);
+                    let allData = [];
+
+                    if (airCompony === 'HU') {
+                        // 获取 HU 的数据
+                        const huData = await this.fetchAllData(depCityCode, arrCityCode, startFltDate, endFltDate, 'HU', authorizationToken, xsrfToken);
+                        // 获取 CN 的数据
+                        const cnData = await this.fetchAllData(depCityCode, arrCityCode, startFltDate, endFltDate, 'CN', authorizationToken, xsrfToken);
+                        // 合并数据
+                        allData = [...huData, ...cnData];
+                    } else {
+                        // 对于其他航空公司，只获取其自身的数据
+                        allData = await this.fetchAllData(depCityCode, arrCityCode, startFltDate, endFltDate, airCompony, authorizationToken, xsrfToken);
+                    }
+
                     state.globalFetchedData = allData;
                     console.log('已经获取了新的价差数据', allData);
                 } catch (error) {
@@ -2311,13 +2326,11 @@
     ModuleSystem.define('excludeFlight', ['core', 'state', 'uiOperations'], function(core, state, uiOperations) {
         let isFillingForm = false;
 
-        async function fillExcludeForm() {
+        if (!core.isFeatureEnabled("k_quickNavigation")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
 
-            // 检查功能是否启用
-            if (!core.isFeatureEnabled("k_quickNavigation")) {
-                console.log('快捷导航功能未启用，跳过填充表单');
-                return;
-            }
+        async function fillExcludeForm() {
 
             if (isFillingForm) {
                 console.log('表单填充正在进行中，跳过本次调用');
@@ -2327,7 +2340,7 @@
             const reportNewButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
             .find(btn => btn.textContent.includes('呈报新排除航班'));
 
-            const currentFlightInfo = JSON.parse(sessionStorage.getItem('currentFlightInfo') || 'null');
+            const currentFlightInfo = state.currentFlightInfo;
             const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
 
             if (!reportNewButton || !currentFlightInfo || !currentModule) return;
@@ -2361,7 +2374,6 @@
                 console.error('填充表单过程中发生错误:', error);
             } finally {
                 isFillingForm = false;
-                sessionStorage.removeItem('currentFlightInfo');
                 sessionStorage.removeItem('currentModule');
                 sessionStorage.removeItem('currentJob');
                 console.log('表单填充结束');
@@ -2375,7 +2387,7 @@
             }
 
             try {
-                const currentFlightInfo = JSON.parse(sessionStorage.getItem('currentFlightInfo') || 'null');
+                const currentFlightInfo = state.currentFlightInfo;
                 const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
                 const formattedDate = formatDate(currentFlightInfo.date);
                 const title = `${formattedDate}${currentFlightInfo.origin}${currentFlightInfo.dest}排除${currentModule}`;
@@ -2395,7 +2407,7 @@
                 return diffDays;
             }
 
-            const currentFlightInfo = JSON.parse(sessionStorage.getItem('currentFlightInfo') || 'null');
+            const currentFlightInfo = state.currentFlightInfo;
             const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
             const currentJob = JSON.parse(sessionStorage.getItem('currentJob') || 'null');
             const leaderData = JSON.parse(sessionStorage.getItem('leaderData') || 'null');
@@ -2433,11 +2445,18 @@
         }
 
         return {
-            fillExcludeForm: fillExcludeForm
+            init: function() {
+                fillExcludeForm();
+            },
         };
     });
 
     ModuleSystem.define('batchPolicy', ['core', 'state', 'uiOperations'], function(core, state, uiOperations) {
+
+        if (!core.isFeatureEnabled("k_bulkCabinChange")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
+
         // 私有变量
         const STORAGE_KEY = 'cabinPricePolicyStorage';
         const EDIT_LOCK_KEY = 'cabinPricePolicyEditLock';
@@ -2737,7 +2756,7 @@
             const priceData = cabinPricePolicyStorage[segment]?.[flightNumber]?.[date];
 
             if (!priceData) {
-                console.log('未找到匹配的价格数据');
+                //console.log('未找到匹配的价格数据');
                 return;
             }
 
@@ -2758,7 +2777,6 @@
         // 公共接口
         return {
             init: function() {
-                if (!core.isFeatureEnabled("k_bulkCabinChange")) return;
                 fetchInitialCellValues();
                 updateInitialPrices();
                 addDoubleClickHandler();
@@ -2778,7 +2796,6 @@
     ModuleSystem.define('batchAVJ', ['core', 'state', 'uiOperations', 'dataEventManager'], function(core, state, uiOperations, dataEventManager) {
         // 检查功能是否启用
         if (!core.isFeatureEnabled("k_batchavjlong")) {
-            console.log('批量 AVJ 功能未启用');
             return { init: function() {} }; // 返回空的初始化函数
         }
 
@@ -2991,7 +3008,13 @@
         };
     });
 
-    ModuleSystem.define('tableFilterModule', ['core', 'state'], function(core, state) {
+    ModuleSystem.define('tableFilterModule', ['core', 'state', 'batchAVJ'], function(core, state, batchAVJ) {
+
+        // 检查功能是否启用
+        if (!core.isFeatureEnabled("k_batchavjlong")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
+
         // 私有变量和函数
         const DEBOUNCE_DELAY = 1000;
 
@@ -3084,143 +3107,239 @@
         // 公共接口
         return {
             init: function() {
-                // 这里可以添加任何需要在模块初始化时执行的代码
-                console.log('Table Filter Module initialized');
-            },
-            observeTableChanges: observeTableChanges
+                observeTableChanges();
+            }
         };
     });
 
-    ModuleSystem.define('elementObserver', ['core', 'state'], function(core, state) {
-        function setupHoverListeners(node) {
-            function onElementHover(event) {
-                requestAnimationFrame(() => {
-                    state.currentDateFlightElement = null;
-                    state.currentPriceElement = null;
-                    state.PriceList = null;
-                    const target = event.target;
+    ModuleSystem.define('elementObserver', ['core', 'state','config', 'indicesManager'], function(core, state,config, indicesManager) {
 
-                    const parentCell = target.closest('.art-table-cell');
-                    if (parentCell && parentCell.parentElement && parentCell.parentElement.classList.contains('art-table-row')) {
-                        const cells = Array.from(parentCell.parentElement.children).filter(child => child.classList.contains('art-table-cell'));
-                        const isFirstCellSpecial = cells[0].classList.contains('first');
+        if (!core.isFeatureEnabled("priceDisplay") && !core.isFeatureEnabled("syncDisplay") || !core.$('#refresh')) {
+            return { init: function() {} };
+        }
 
-                        const { dateFlightIndex_origin, economicPriceIndex_origin, businessPriceIndex_origin } = state.globalIndices;
+        // 在航班调整页面，发起调价的时候，也会出来一个table，可能会引起监控的性能问题。
+        // 排除这个页面
+        function isInPriceAdjustmentModal() {
+            const modalTitle = document.querySelector('.ant-modal-title div');
+            return modalTitle && modalTitle.textContent.trim() === '发起调价';
+        }
 
-                        const dateFlightIndex = isFirstCellSpecial ? dateFlightIndex_origin : dateFlightIndex_origin - 1;
-                        const economicPriceIndex = isFirstCellSpecial ? economicPriceIndex_origin : economicPriceIndex_origin - 1;
-                        const businessPriceIndex = isFirstCellSpecial ? businessPriceIndex_origin : businessPriceIndex_origin - 1;
-
-                        if (cells.indexOf(parentCell) === economicPriceIndex) {
-                            state.PriceList = getPricesList(target, economicPriceIndex_origin);
-                            state.currentDateFlightElement = cells[dateFlightIndex].querySelector('[id^="data-"]');
-                            state.currentPriceElement = target;
-                        } else if (cells.indexOf(parentCell) === businessPriceIndex) {
-                            state.PriceList = getPricesList(target, businessPriceIndex_origin);
-                            state.currentDateFlightElement = cells[dateFlightIndex].querySelector('[id^="data-"]');
-                            state.currentPriceElement = target;
-                        } else if (cells.indexOf(parentCell) === dateFlightIndex) {
-                            if (target.id && target.id.startsWith('data-')) {
-                                state.currentDateFlightElement = target;
-                            }
-                        }
-                    }
-                });
+        function onElementHover(event) {
+            if (isInPriceAdjustmentModal()) {
+                return; // 如果在"发起调价"模态框中，直接返回
             }
+            requestAnimationFrame(() => {
+                // 重置状态
+                state.currentElementType = null;
+                state.PriceList = null;
+                state.currentFlightInfo = null;
 
-            function getPricesList(target, targetIndex) {
-                const parentTBody = target.closest('tbody');
-                if (!parentTBody) return;
+                const targetCell = event.target.closest('.art-table-cell');
+                if (!targetCell) return;
 
-                const rows = parentTBody.querySelectorAll('.art-table-row');
-                let flightData = [];
-
-                function extractPrice(cell) {
-                    if (!cell) return null;
-                    const text = cell.innerText.trim();
-                    if (text === "--") return null;
-                    const match = text.match(/\d+/);
-                    return match ? parseInt(match[0], 10) : null;
+                // 检查是否是"暂无数据"的情况
+                if (targetCell.querySelector('.ant-empty-description')) {
+                    //console.log('Table is empty, no data available');
+                    return;
                 }
 
-                rows.forEach(row => {
-                    const cells = row.children;
-                    if (!cells.length) return;
+                const row = targetCell.closest('.art-table-row');
+                if (!row || row.classList.contains('no-hover')) return;
 
-                    const isFirstCellSpecial = cells[0].classList.contains('first');
-                    const { dateFlightIndex_origin, economicPriceIndex_origin, businessPriceIndex_origin } = state.globalIndices;
+                // 尝试获取航班信息和元素类型，并进行错误处理
+                let flightInfo, elementType;
+                try {
+                    flightInfo = getFlightInfo(row);
+                    elementType = getElementType(targetCell, row);
+                } catch (error) {
+                    console.warn('Error in getting flight info or element type:', error);
+                    console.log('targetCell', targetCell);
+                    console.log('row', row);
+                    return; // 如果出错，直接返回
+                }
 
-                    const dateFlightIndex = isFirstCellSpecial ? dateFlightIndex_origin : dateFlightIndex_origin - 1;
-                    const economicPriceIndex = isFirstCellSpecial ? economicPriceIndex_origin : economicPriceIndex_origin - 1;
-                    const businessPriceIndex = isFirstCellSpecial ? businessPriceIndex_origin : businessPriceIndex_origin - 1;
+                // 检查 flightInfo 和 elementType 是否有效
+                if (!flightInfo || !elementType) {
+                    console.warn('Invalid flight info or element type');
+                    return;
+                }
 
-                    const dateFlightCell = cells[dateFlightIndex];
-                    const dateFlightId = dateFlightCell.querySelector('[id^="data-"]')?.id;
-                    if (!dateFlightId) return;
+                // 更新状态
+                state.currentFlightInfo = flightInfo;
+                state.currentElementType = elementType;
 
-                    const idParts = dateFlightId.split('-');
-                    const flightDate = new Date(idParts[1], idParts[2] - 1, idParts[3]);
-                    flightDate.setHours(0, 0, 0, 0);
-                    const flightNumber = idParts[4];
+                const { airCompony } = state.userInfo;
 
-                    if (targetIndex === economicPriceIndex_origin) {
-                        const economicCell = cells[economicPriceIndex];
-                        const economicPrice = extractPrice(economicCell);
-                        if (economicPrice !== null) {
-                            flightData.push({ date: flightDate, flightNumber: flightNumber, economicPrice: economicPrice });
-                        }
+                // 检查是否需要获取价格列表
+                if ((elementType === config.ELEMENT_TYPES.ECONOMIC_PRICE ||
+                     elementType === config.ELEMENT_TYPES.BUSINESS_PRICE) &&
+                    (flightInfo.flightNumber.includes(airCompony) || flightInfo.flightNumber.includes('CN'))) {
+                    try {
+                        state.PriceList = getPricesList(targetCell, state.currentElementType);
+                    } catch (error) {
+                        console.warn('Error in getting price list:', error);
+                        state.PriceList = null; // 如果获取价格列表失败，设置为 null
                     }
+                }
 
-                    if (targetIndex === businessPriceIndex_origin) {
-                        const businessCell = cells[businessPriceIndex];
-                        const businessPrice = extractPrice(businessCell);
-                        if (businessPrice !== null) {
-                            flightData.push({ date: flightDate, flightNumber: flightNumber, businessPrice: businessPrice });
-                        }
-                    }
-                });
+                // 用于调试的日志输出（可以根据需要启用）
+                // console.log("state.currentFlightInfo", state.currentFlightInfo);
+                // console.log("state.currentElementType", state.currentElementType);
+                // console.log("state.PriceList", state.PriceList);
+            });
+        }
 
-                return flightData;
+        function getElementType(cell, row) {
+            const cells = Array.from(row.children).filter(child => child.classList.contains('art-table-cell'));
+            const isFirstCellSpecial = cells[0].classList.contains('first');
+            const { dateFlightIndex, economicPriceIndex, businessPriceIndex } = indicesManager.calculateIndices(isFirstCellSpecial);
+
+            const cellIndex = cells.indexOf(cell);
+
+            if (cellIndex === dateFlightIndex) {
+                return config.ELEMENT_TYPES.DATE_FLIGHT;
+            } else if (cellIndex === economicPriceIndex) {
+                return config.ELEMENT_TYPES.ECONOMIC_PRICE;
+            } else if (cellIndex === businessPriceIndex) {
+                return config.ELEMENT_TYPES.BUSINESS_PRICE;
+            } else {
+                return config.ELEMENT_TYPES.OTHER;
+            }
+        }
+
+        function getFlightInfo(row) {
+
+            const cells = Array.from(row.children).filter(child => child.classList.contains('art-table-cell'));
+            const isFirstCellSpecial = cells[0].classList.contains('first');
+            const { dateFlightIndex } = indicesManager.calculateIndices(isFirstCellSpecial);
+
+            const dateFlightCell = cells[dateFlightIndex];
+            const dateFlightElement = dateFlightCell.querySelector('[id^="data-"]');
+            if (!dateFlightElement) return null;
+
+            const idParts = dateFlightElement.id.split('-');
+            const date = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
+            const flightNumber = idParts[4];
+
+            const filteredFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || 'null');
+
+            if (!filteredFlightList || !Array.isArray(filteredFlightList)) {
+                console.log('filteredFlightList is null or not an array');
+                return null;
             }
 
-            if (!state.globalIndices) return;
+            const userInfo = state.userInfo;
+            const { airCompony } = userInfo;
 
-            node.removeEventListener('mouseover', onElementHover);
-            node.addEventListener('mouseover', onElementHover);
+            const matchedFlight = filteredFlightList.find(flight => {
+                return flight.fltDate.split(' ')[0] === date && flight.fltNo === flightNumber ;
+            });
+
+            if (!matchedFlight) return null;
+
+            const airRoute = matchedFlight.airRoute.replace(/-/g, '');
+
+            return {
+                date: date,
+                flightNumber: flightNumber,
+                segment: airRoute,
+                origin: matchedFlight.origin,
+                dest: matchedFlight.dest
+            };
+        }
+
+        function getPricesList(target, priceType) {
+            //console.log('Getting prices list for', priceType);
+            const parentTBody = target.closest('tbody');
+            if (!parentTBody) return [];
+
+            const rows = parentTBody.querySelectorAll('.art-table-row');
+            const flightData = [];
+
+            rows.forEach(row => {
+                const cells = Array.from(row.children).filter(child => child.classList.contains('art-table-cell'));
+                if (!cells.length) return;
+
+                const isFirstCellSpecial = cells[0].classList.contains('first');
+                const { dateFlightIndex, economicPriceIndex, businessPriceIndex } = indicesManager.calculateIndices(isFirstCellSpecial);
+
+                const dateFlightCell = cells[dateFlightIndex];
+                const dateFlightElement = dateFlightCell.querySelector('[id^="data-"]');
+                if (!dateFlightElement || !dateFlightElement.id) return;
+
+                const [, year, month, day, flightNumber] = dateFlightElement.id.split('-');
+                const flightDate = new Date(year, month - 1, day);
+                flightDate.setHours(0, 0, 0, 0);
+
+                let price;
+                if (priceType === config.ELEMENT_TYPES.ECONOMIC_PRICE) {
+                    price = extractPrice(cells[economicPriceIndex]);
+                } else if (priceType === config.ELEMENT_TYPES.BUSINESS_PRICE) {
+                    price = extractPrice(cells[businessPriceIndex]);
+                }
+
+                if (price !== null) {
+                    flightData.push({
+                        date: flightDate,
+                        flightNumber,
+                        [priceType]: price,
+                    });
+                }
+            });
+
+            //console.log('Flight data:', flightData);
+            return flightData;
+        }
+
+        function extractPrice(cell) {
+            if (!cell) return null;
+            const text = cell.innerText.trim();
+            if (text === "--") return null;
+            const match = text.match(/\d+/);
+            return match ? parseInt(match[0], 10) : null;
+        }
+
+        function setupEventListeners(container) {
+            container.removeEventListener('mouseover', onElementHover);
+            container.addEventListener('mouseover', onElementHover);
         }
 
         return {
-            observeElements: function(mutations) {
-                if (!core.$('#refresh')) return;
+            init: function() {
 
-                mutations.forEach(mutation => {
-                    mutation.addedNodes.forEach(node => {
-                        if (node.nodeType === 1) {
-                            if (node.classList.contains('art-table-cell')) {
-                                setupHoverListeners(node);
-                            }
-                            const cells = node.querySelectorAll('.art-table-cell');
-                            cells.forEach(cell => setupHoverListeners(cell));
-                        }
-                    });
-                });
-            }
+                if (!state.globalIndices) {
+                    //console.log("globalIndices not set");
+                    return;
+                }
+
+                const tableContainer = core.$('.art-table');
+                if (tableContainer) {
+                    setupEventListeners(tableContainer);
+                }
+            },
+            getFlightInfo: getFlightInfo,
         };
     });
 
-    ModuleSystem.define('tooltipObserver', ['core', 'state'], function(core, state) {
+    ModuleSystem.define('tooltipObserver', ['core', 'state', 'config'], function(core, state, config) {
+
+        if (!core.isFeatureEnabled("priceDisplay") && !core.isFeatureEnabled("syncDisplay")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
+
         // Utility functions
         const dateDiffInDays = (a, b) => Math.floor((a - b) / (1000 * 60 * 60 * 24));
         const createPureDate = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
-        function processSyncDatePriceData(additionalData, idParts, targetDate) {
+        function processSyncDatePriceData(additionalData, targetFlight, targetDate) {
             let additionalContent = '';
             const horizontalLine = '<hr style="border: none; border-top: 1px solid white;">';
 
             additionalData.forEach(item => {
                 const itemFltDate = new Date(item.fltDate);
                 itemFltDate.setHours(0, 0, 0, 0);
-                if (item.fltNo === idParts[4] && itemFltDate.getTime() === targetDate.getTime()) {
+                if (item.fltNo === targetFlight && itemFltDate.getTime() === targetDate.getTime()) {
                     const remark = JSON.parse(item.remark || '{}');
                     let firstPart = '';
                     let secondPart = '';
@@ -3252,7 +3371,8 @@
             return additionalContent;
         }
 
-        function processPriceDiffData(fetchedData, idParts, targetDate, today) {
+        function processPriceDiffData(fetchedData, targetFlight, targetDate, today) {
+
             let content = '';
             const flightsData = {};
 
@@ -3262,7 +3382,7 @@
                 const pureEffectiveDateEnd = createPureDate(new Date(entry.effectiveDateEnd));
                 const pureTargetDate = createPureDate(targetDate);
 
-                const matchesFltNo = entry.compFltNo.includes(idParts[4]);
+                const matchesFltNo = (entry.compFltNo.includes(targetFlight));
                 const isWithinDate = pureEffectiveDateStart <= pureTargetDate && pureEffectiveDateEnd >= pureTargetDate;
                 const isWithinDcp = daysDifference >= entry.startDcp && daysDifference <= entry.endDcp;
                 const isWithinDow = entry.carryDow.includes((targetDate.getDay() === 0 ? 7 : targetDate.getDay()));
@@ -3280,20 +3400,13 @@
             return content;
         }
 
-        function getLowestPrice(fetchedData, flightData, targetDate, today) {
+        function getLowestPrice(cabinType, fetchedData, flightData, targetDate, today) {
 
-            let cabinType = '';
-            if ('economicPrice' in flightData[0]){
-                cabinType='经济舱';
-            } else if ('businessPrice' in flightData[0]){
-                cabinType='公务舱';
-            }
-
-            console.log("Target Date:", targetDate);
-            console.log("Today:", today);
-            console.log("Cabin Type:", cabinType);
-            console.log("Flight Data:", flightData);
-            console.log("fetched Data:", fetchedData);
+            //console.log("Target Date:", targetDate);
+            //console.log("Today:", today);
+            //console.log("Cabin Type:", cabinType);
+            //console.log("Flight Data:", flightData);
+            //console.log("fetched Data:", fetchedData);
 
             const lowestPrices = [];
 
@@ -3308,8 +3421,8 @@
                 const isWithinDate = effectiveStartDate <= targetDate && effectiveEndDate >= targetDate;
                 const isWithinDcp = daysDifference >= entry.startDcp && daysDifference <= entry.endDcp;
                 const isWithinDow = entry.carryDow.includes((targetDate.getDay() === 0 ? 7 : targetDate.getDay()));
-                const idParts = state.currentDateFlightElement.id.split('-');
-                const matchesFltNo = (entry.airline+entry.fltNo)===(idParts[4]);
+                const idParts = state.currentFlightInfo.flightNumber;
+                const matchesFltNo = (entry.airline+entry.fltNo)===(idParts);
                 const matchesCabinType = entry.bigCabin === cabinType;
 
                 return isWithinDate && isWithinDcp && isWithinDow && matchesFltNo && matchesCabinType;
@@ -3353,7 +3466,9 @@
             }
         }
 
-        function updateTooltipContent(tooltipElement, targetElement) {
+        function updateTooltipContent(tooltipElement) {
+
+            const currentFlightInfo = state.currentFlightInfo;
             if (tooltipElement.getAttribute('data-modified')) return;
 
             const fetchedData = state.globalFetchedData;
@@ -3361,36 +3476,45 @@
             const userInfo = state.userInfo;
             const { airCompony } = userInfo;
 
-            const idParts = targetElement.id.split('-');
-            const targetDate = new Date(idParts[1], idParts[2] - 1, idParts[3]);
+            const targetDate = new Date(currentFlightInfo.date);
+            const targetAirCompany = currentFlightInfo.flightNumber.substring(0, 2);
+            const targetFlight = currentFlightInfo.flightNumber;
             const today = new Date();
             targetDate.setHours(0, 0, 0, 0);
             today.setHours(0, 0, 0, 0);
 
             let content = '';
 
-            if (idParts[4].includes(airCompony) || (airCompony === "HU" && idParts[4].includes("CN"))) {
+            const elementType = state.currentElementType;
+
+            if (targetAirCompany === airCompony || (airCompony === "HU" && targetAirCompany === "CN")) {
                 if (fetchedData && state.PriceList) {
-                    if ('economicPrice' in state.PriceList[0]) {
+                    if (elementType === config.ELEMENT_TYPES.ECONOMIC_PRICE) {
                         content += "<div>经济舱最低价格：</div>";
-                        let price = getLowestPrice(fetchedData, state.PriceList, targetDate, today);
+                        const cabinType = '经济舱';
+                        let price = getLowestPrice(cabinType, fetchedData, state.PriceList, targetDate, today);
                         content += `<div>${price !== null ? price : '未设置一线一策'}</div>`;
                         tooltipElement.innerHTML = content;
-                    } else if ('businessPrice' in state.PriceList[0]) {
+                    } else if (elementType === config.ELEMENT_TYPES.BUSINESS_PRICE) {
                         content += "<div>公务舱最低价格：</div>";
-                        let price = getLowestPrice(fetchedData, state.PriceList, targetDate, today);
+                        const cabinType = '公务舱';
+                        let price = getLowestPrice(cabinType, fetchedData, state.PriceList, targetDate, today);
                         content += `<div>${price !== null ? price : '未设置一线一策'}</div>`;
                         tooltipElement.innerHTML = content;
                     }
                 }
                 if (additionalData && !state.PriceList) {
-                    content += processSyncDatePriceData(additionalData, idParts, targetDate);
-                    tooltipElement.innerHTML += content;
+                    if (elementType === config.ELEMENT_TYPES.DATE_FLIGHT) {
+                        content += processSyncDatePriceData(additionalData, targetFlight, targetDate);
+                        tooltipElement.innerHTML += content;
+                    }
                 }
             } else {
                 if (fetchedData) {
-                    content += processPriceDiffData(fetchedData, idParts, targetDate, today);
-                    tooltipElement.innerHTML += content;
+                    if (elementType === config.ELEMENT_TYPES.DATE_FLIGHT) {
+                        content += processPriceDiffData(fetchedData, targetFlight, targetDate, today);
+                        tooltipElement.innerHTML += content;
+                    }
                 }
             }
 
@@ -3403,20 +3527,20 @@
         }
 
         return {
-            observeTooltips: function(mutations) {
+            init: function(mutations) {
                 mutations.forEach(mutation => {
                     if (mutation.type === 'childList') {
                         mutation.addedNodes.forEach(node => {
                             if (node.nodeType !== Node.ELEMENT_NODE) return;
 
-                            if (!state.currentDateFlightElement) return;
+                            if (!state.currentElementType) return;
 
                             const tooltipElement = node.querySelector('.ant-tooltip');
                             if (tooltipElement && !tooltipElement.classList.contains('ant-tooltip-hidden')) {
                                 const tooltipInner = tooltipElement.querySelector('.ant-tooltip-inner');
                                 if (tooltipInner && !tooltipInner.getAttribute('data-modified')) {
                                     if (!isTooltipContentNotValid(tooltipInner)) {
-                                        updateTooltipContent(tooltipInner, state.currentDateFlightElement);
+                                        updateTooltipContent(tooltipInner);
                                         tooltipInner.setAttribute('data-modified', 'true');
                                     }
                                 }
@@ -3446,12 +3570,12 @@
                     enhanceUI.init();
                     enhanceUIWithContextMenu.init();
                     dataEventManager.init(mutations);
-                    excludeFlight.fillExcludeForm();
+                    excludeFlight.init();
                     batchPolicy.init();
-                    tableFilterModule.observeTableChanges();
                     batchAVJ.init();
-                    elementObserver.observeElements(mutations);
-                    tooltipObserver.observeTooltips(mutations);
+                    tableFilterModule.init();
+                    elementObserver.init(mutations);
+                    tooltipObserver.init(mutations);
                 }
             });
 
