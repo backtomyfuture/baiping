@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.2
+// @version           1.0.3
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -167,6 +167,16 @@
 - 优化功能：修复enhanceUIWithContextMenu中的bug，讲判断条件放到addCustomContextMenu中；
 - 优化功能：修复了processPriceDiffData中targetFlight参数的bug；
 - 新增功能：新增了CN航班价差信息。
+
+## 版本 1.0.3
+### 2024-09-27
+- 优化功能：优化longInstruction的名称；
+
+### 2024-09-29
+- 优化功能：优化enhanceUIWithContextMenu的逻辑，新增了state中的excludeFlightInfo，替换currentFlightInfo；
+- 优化功能：优化enhanceUIWithContextMenu的逻辑，增加了调整页面没有航班信息时候的return；
+- 优化功能：优化enhanceUIWithContextMenu的逻辑，将航司的判断放到了click里边；
+- 优化功能：优化enhanceUIWithContextMenu的逻辑，修复了原本代码中left与right错误的问题；
 
 
 */
@@ -504,6 +514,7 @@
         let _globalIndices = null;
         let _currentElementType = null;
         let _currentFlightInfo = null;
+        let _excludeFlightInfo = null;
         let _priceList = null;
         let _currentMenuId = null;
         const _requestCache = new Map();
@@ -557,6 +568,13 @@
             },
             set priceList(list) {
                 _priceList = list;
+            },
+
+            get excludeFlightInfo() {
+                return _excludeFlightInfo;
+            },
+            set excludeFlightInfo(info) {
+                _excludeFlightInfo = info;
             },
 
             get currentMenuId() {
@@ -1266,7 +1284,7 @@
         };
     });
 
-    ModuleSystem.define('longInstruction', ['core', 'state'], function(core, state) {
+    ModuleSystem.define('apiHookManager', ['core', 'state'], function(core, state) {
 
         function HookXMLHttpRequest() {
 
@@ -1589,32 +1607,18 @@
         }
 
         function addCustomContextMenu() {
-            const refreshElement = core.$('#refresh');
-            const leftTargetElement = core.$('#cabin-control-id');
-            const rightTargetElement = core.$('.art-table');
 
-            if ( leftTargetElement && !leftTargetElement.dataset.customMenuAdded) {
+            const refreshElement = core.$('#refresh');
+            const leftTargetElement = core.$('.art-table');
+            const rightTargetElement = core.$('#cabin-control-id');
+
+
+            if ( refreshElement && leftTargetElement && !leftTargetElement.dataset.customMenuAdded && !leftTargetElement.querySelector('.ant-empty-description')) {
                 setupContextMenu(leftTargetElement, 'left');
             }
 
-            if (refreshElement && rightTargetElement && !rightTargetElement.dataset.customMenuAdded) {
-                const currentFlightInfo = state.currentFlightInfo
-
-                // 检查当前航班信息是否存在
-                if (!currentFlightInfo || !currentFlightInfo.flightNumber) {
-                    //console.log('No current flight info available');
-                    return;
-                }
-
-                const targetAirCompany = currentFlightInfo.flightNumber.substring(0, 2);
-                const userInfo = state.userInfo;
-                const { airCompony } = userInfo;
-
-                // 检查航空公司是否匹配
-                if ((targetAirCompany === airCompony) || (airCompony === "HU" && targetAirCompany === "CN")) {
-                    setupContextMenu(rightTargetElement, 'right');
-                }
-
+            if (rightTargetElement && !rightTargetElement.dataset.customMenuAdded) {
+                setupContextMenu(rightTargetElement, 'right');
             }
         }
 
@@ -1640,10 +1644,10 @@
             menu.style.left = `${x}px`;
             menu.style.top = `${y}px`;
 
-            if (side === 'left') {
-                addLeftMenuItems(menu);
-            } else {
+            if (side === 'right') {
                 addRightMenuItems(menu);
+            } else {
+                addLeftMenuItems(menu);
             }
 
             return menu;
@@ -1697,7 +1701,7 @@
     `);
         }
 
-        function addLeftMenuItems(menu) {
+        function addRightMenuItems(menu) {
             const sendItem = createMenuItem('发送指令');
             sendItem.addEventListener('click', () => {
                 const button = Array.from(core.$$('button.ant-btn.ant-btn-primary')).find(btn => btn.textContent.includes('发送指令'));
@@ -1720,12 +1724,19 @@
             menu.appendChild(priceAdjustmentItem);
         }
 
-        function addRightMenuItems(menu) {
+        function addLeftMenuItems(menu) {
             const excludeFlightItem = createMenuItem('排除航班', true);
             const moduleSubMenu = createSubmenu();
             excludeFlightItem.appendChild(moduleSubMenu);
 
             const menuData = JSON.parse(sessionStorage.getItem('menuData') || 'null');
+            const currentFlightInfo = state.currentFlightInfo
+
+            // 检查当前航班信息是否存在
+            if (!currentFlightInfo || !currentFlightInfo.flightNumber) {
+                //console.log('No current flight info available');
+                return;
+            }
 
             if (menuData) {
                 menuData.forEach(moduleData => {
@@ -1737,10 +1748,20 @@
                         jobItem.addEventListener('click', (e) => {
                             e.stopPropagation();
                             console.log(`排除航班 - ${moduleData.module} - ${job}`);
-                            simulateClick('排除航班');
-                            sessionStorage.setItem('currentModule', JSON.stringify(moduleData.module));
-                            sessionStorage.setItem('currentJob', JSON.stringify(job));
+
+                            const targetAirCompany = currentFlightInfo.flightNumber.substring(0, 2);
+                            const userInfo = state.userInfo;
+                            const { airCompony } = userInfo;
+
+                            // 检查航空公司是否匹配
+                            if ((targetAirCompany === airCompony) || (airCompony === "HU" && targetAirCompany === "CN")) {
+                                simulateClick('排除航班');
+                                sessionStorage.setItem('excludeFlightInfo', JSON.stringify(currentFlightInfo));
+                                sessionStorage.setItem('currentModule', JSON.stringify(moduleData.module));
+                                sessionStorage.setItem('currentJob', JSON.stringify(job));
+                            }
                             removeAllCustomMenus();
+
                         });
                         jobSubMenu.appendChild(jobItem);
                     });
@@ -2340,10 +2361,10 @@
             const reportNewButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
             .find(btn => btn.textContent.includes('呈报新排除航班'));
 
-            const currentFlightInfo = state.currentFlightInfo;
+            const excludeFlightInfo = JSON.parse(sessionStorage.getItem('excludeFlightInfo') || 'null');
             const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
 
-            if (!reportNewButton || !currentFlightInfo || !currentModule) return;
+            if (!reportNewButton || !excludeFlightInfo || !currentModule) return;
 
             isFillingForm = true;
             console.log('开始填充表单');
@@ -2376,6 +2397,7 @@
                 isFillingForm = false;
                 sessionStorage.removeItem('currentModule');
                 sessionStorage.removeItem('currentJob');
+                sessionStorage.removeItem('excludeFlightInfo');
                 console.log('表单填充结束');
             }
         }
@@ -2387,10 +2409,10 @@
             }
 
             try {
-                const currentFlightInfo = state.currentFlightInfo;
+                const excludeFlightInfo = JSON.parse(sessionStorage.getItem('excludeFlightInfo') || 'null');
                 const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
-                const formattedDate = formatDate(currentFlightInfo.date);
-                const title = `${formattedDate}${currentFlightInfo.origin}${currentFlightInfo.dest}排除${currentModule}`;
+                const formattedDate = formatDate(excludeFlightInfo.date);
+                const title = `${formattedDate}${excludeFlightInfo.origin}${excludeFlightInfo.dest}排除${currentModule}`;
                 await uiOperations.fillInput('#basic_flowInstanceName', title);
                 await uiOperations.fillTextArea('#basic_remark', '请领导审批');
             } catch (error) {
@@ -2407,34 +2429,34 @@
                 return diffDays;
             }
 
-            const currentFlightInfo = state.currentFlightInfo;
+            const excludeFlightInfo = JSON.parse(sessionStorage.getItem('excludeFlightInfo') || 'null');
             const currentModule = JSON.parse(sessionStorage.getItem('currentModule') || 'null');
             const currentJob = JSON.parse(sessionStorage.getItem('currentJob') || 'null');
             const leaderData = JSON.parse(sessionStorage.getItem('leaderData') || 'null');
 
-            if (!currentFlightInfo.flightNumber) {
+            if (!excludeFlightInfo.flightNumber) {
                 console.error('currentFlightInfo 不存在或不完整');
                 return;
             }
 
-            const airline = currentFlightInfo.flightNumber.substring(0, 2);
+            const airline = excludeFlightInfo.flightNumber.substring(0, 2);
 
             try {
-                await uiOperations.fillDatePicker('#fltDate', currentFlightInfo.date);
-                await uiOperations.fillDatePicker('input[placeholder="结束日期"]', currentFlightInfo.date);
-                await uiOperations.fillInput('#route', currentFlightInfo.segment);
+                await uiOperations.fillDatePicker('#fltDate', excludeFlightInfo.date);
+                await uiOperations.fillDatePicker('input[placeholder="结束日期"]', excludeFlightInfo.date);
+                await uiOperations.fillInput('#route', excludeFlightInfo.segment);
                 await uiOperations.selectDropdownOption('#airline', airline);
                 await uiOperations.selectDropdownOption('#module', currentModule);
                 await uiOperations.selectDropdownOption('#jobName', currentJob);
-                await uiOperations.fillInput('#seg', currentFlightInfo.origin + currentFlightInfo.dest);
+                await uiOperations.fillInput('#seg', excludeFlightInfo.origin + excludeFlightInfo.dest);
                 if (currentModule.includes('公务')) {
                     await uiOperations.selectDropdownOption('#applicableCabin', '公务舱');
                 } else {
                     await uiOperations.selectDropdownOption('#applicableCabin', '经济舱');
                 }
-                await uiOperations.fillInput('#fltNo', currentFlightInfo.flightNumber);
+                await uiOperations.fillInput('#fltNo', excludeFlightInfo.flightNumber);
                 await uiOperations.fillInput('#startDcp', '0');
-                const dcp = calculateDCP(currentFlightInfo.date);
+                const dcp = calculateDCP(excludeFlightInfo.date);
                 await uiOperations.fillInput('#endDcp', dcp.toString());
                 await uiOperations.selectDropdownOption('#approveLead', leaderData[0]);
                 const reason = "为了确保航班正常销售，特此申请暂时剔除自动化调整规则，以便根据实时市场情况灵活调整。";
@@ -3184,10 +3206,12 @@
                 }
 
                 // 用于调试的日志输出（可以根据需要启用）
-                // console.log("state.currentFlightInfo", state.currentFlightInfo);
+                //console.log("state.currentFlightInfo", state.currentFlightInfo);
                 // console.log("state.currentElementType", state.currentElementType);
                 // console.log("state.PriceList", state.PriceList);
             });
+
+
         }
 
         function getElementType(cell, row) {
@@ -3552,13 +3576,13 @@
         };
     });
 
-    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'longInstruction', 'enhanceUI', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver'],
-                        function(core, state, menuManager, indicesManager, longInstruction, enhanceUI, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver) {
+    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver'],
+                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver) {
 
         function loadDefaultAction() {
             // 初始化其他不依赖 MutationObserver 的模块...
             menuManager.init();
-            longInstruction.init();
+            apiHookManager.init();
             indicesManager.init();
         }
 
