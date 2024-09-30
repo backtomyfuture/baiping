@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.3
+// @version           1.0.4
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -177,6 +177,10 @@
 - 优化功能：优化enhanceUIWithContextMenu的逻辑，增加了调整页面没有航班信息时候的return；
 - 优化功能：优化enhanceUIWithContextMenu的逻辑，将航司的判断放到了click里边；
 - 优化功能：优化enhanceUIWithContextMenu的逻辑，修复了原本代码中left与right错误的问题；
+
+## 版本 1.0.4
+### 2024-09-30
+- 优化功能：优化batchPolicy中的addNextStepButtonListener功能，现在点击“下一步”只删除页面表格中有的数据；
 
 
 */
@@ -366,7 +370,7 @@
                 },
                 {
                     id: 'quickNavigation',
-                    text: '快捷跳转',
+                    text: '航班排除快捷跳转',
                     hasCheckbox: true,
                     storageKey: 'k_quickNavigation',
                     defaultValue: true
@@ -2653,8 +2657,53 @@
 
             if (nextStepButton) {
                 nextStepButton.addEventListener('click', () => {
-                    localStorage.removeItem(STORAGE_KEY);
-                    console.log('已清空 cabinPricePolicyStorage');
+                    const tableRows = modalContent.querySelectorAll('.ant-table-tbody tr');
+                    const addedItems = Array.from(tableRows).reduce((acc, row) => {
+                        const cells = row.querySelectorAll('.ant-table-cell');
+                        if (cells.length >= 10) { // 确保行有足够的单元格
+                            const item = {
+                                segment: (cells[3].textContent + cells[4].textContent) || '',
+                                flightNumber: cells[5].textContent || '',
+                                date: (cells[9].textContent || '').replace(/\//g, '-'),
+                                cabin: cells[7].textContent || ''
+                            };
+                            // 只有当所有必要的字段都有值时才添加这一项
+                            if (item.segment && item.flightNumber && item.date && item.cabin) {
+                                acc.push(item);
+                            }
+                        }
+                        return acc;
+                    }, []);
+
+                    //console.log('addedItems', addedItems);
+
+                    const storage = getCabinPricePolicyStorage();
+
+                    addedItems.forEach(item => {
+                        // 转换日期格式以匹配 localStorage 中的格式
+                        const storageDate = item.date.replace(/-/g, '/');
+
+                        if (storage[item.segment] &&
+                            storage[item.segment][item.flightNumber] &&
+                            storage[item.segment][item.flightNumber][storageDate]) {
+                            delete storage[item.segment][item.flightNumber][storageDate][item.cabin];
+
+                            // 清理空对象
+                            if (Object.keys(storage[item.segment][item.flightNumber][storageDate]).length === 0) {
+                                delete storage[item.segment][item.flightNumber][storageDate];
+                            }
+                            if (Object.keys(storage[item.segment][item.flightNumber]).length === 0) {
+                                delete storage[item.segment][item.flightNumber];
+                            }
+                            if (Object.keys(storage[item.segment]).length === 0) {
+                                delete storage[item.segment];
+                            }
+                        }
+                    });
+                    //console.log('storage', storage);
+
+                    saveCabinPricePolicyStorage(storage);
+                    console.log('已从 cabinPricePolicyStorage 中删除添加到表格的数据');
                 });
             } else {
                 console.log('未找到"下一步"按钮');
