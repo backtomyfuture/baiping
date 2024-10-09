@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.7
+// @version           1.0.8
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -204,6 +204,10 @@
 - 优化功能：batchPolicy模块，给localStorage编辑锁设置一个超时时间（最后整体去掉了lock机制）；
 - 新增功能：config模块，新增了GS、HU关于批量政策提报的选项；
 - 新增功能：config模块，新增了GS、HU关于批量AVJ舱位显示顺序；
+
+## 版本 1.0.8
+### 2024-10-09
+- 新增功能：修正了获取同期客座率数据的jobid以及构造参数，同时修改了实际显示的效果；
 
 
 
@@ -2302,7 +2306,7 @@
                     const startFltDate = core.$('input[placeholder="开始日期"]').value;
                     const endFltDate = core.$('input[placeholder="结束日期"]').value;
 
-                    const params = this.setCommandTimes('job_18992');
+                    const params = this.constructHistoricalDataParams('job_18992');
 
                     const url = `http://sfm.hnair.net/sfm-admin/im/autoimlog/list?limit=${params.limit}&jobId=${params.jobId}&origin=${encodeURIComponent(depCityCode)}&dest=${encodeURIComponent(arrCityCode)}&status=${encodeURIComponent(params.status)}&dataSource=${encodeURIComponent(params.dataSource)}&startFltDate=${encodeURIComponent(startFltDate)}&endFltDate=${encodeURIComponent(endFltDate)}&startCmdTime=${encodeURIComponent(params.startCmdTime)}&endCmdTime=${encodeURIComponent(params.endCmdTime)}&isCmd=${encodeURIComponent(params.isCmd)}&jobWarningType=${encodeURIComponent(params.jobWarningType)}`;
                     const headers = {
@@ -2332,17 +2336,34 @@
                     const startFltDate = core.$('input[placeholder="开始日期"]').value;
                     const endFltDate = core.$('input[placeholder="结束日期"]').value;
 
-                    const params = this.setCommandTimes('job_18992');
+                    const params = this.constructCurrentDayDataParams('job_12815');
 
-                    const url = `http://sfm.hnair.net/sfm-admin/im/autoimlog/list?limit=${params.limit}&jobId=${params.jobId}&origin=${encodeURIComponent(depCityCode)}&dest=${encodeURIComponent(arrCityCode)}&status=${encodeURIComponent(params.status)}&dataSource=${encodeURIComponent(params.dataSource)}&startFltDate=${encodeURIComponent(startFltDate)}&endFltDate=${encodeURIComponent(endFltDate)}&startCmdTime=${encodeURIComponent(params.startCmdTime)}&endCmdTime=${encodeURIComponent(params.endCmdTime)}&isCmd=${encodeURIComponent(params.isCmd)}&jobWarningType=${encodeURIComponent(params.jobWarningType)}`;
+                    const url = new URL("http://sfm.hnair.net/sfm-admin/im/autoimlog/list");
+                    url.search = new URLSearchParams({
+                        limit: params.limit,
+                        jobId: params.jobId,
+                        origin: depCityCode,
+                        dest: arrCityCode,
+                        status: params.status,
+                        dataSource: params.dataSource,
+                        startFltDate: startFltDate,
+                        endFltDate: endFltDate,
+                        startCmdTime: params.startCmdTime,
+                        endCmdTime: params.endCmdTime,
+                        isCmd: params.isCmd,
+                        jobWarningType: params.jobWarningType
+                    }).toString();
+
                     const headers = {
-                        'Accept': 'application/json, text/plain, */*',
-                        'X-Authorization': authorizationToken
+                        "accept": "application/json, text/plain, */*",
+                        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+                        "request-starttime": Date.now().toString(),
+                        "x-authorization": authorizationToken
                     };
 
-                    const loadFactorData = await this.fetchPaginatedData(url, headers);
+                    const loadFactorData = await this.fetchPaginatedData(url.toString(), headers);
                     state.globalLoadFactorData = loadFactorData;
-                    console.log('已经获取了历史客座率数据:', loadFactorData);
+                    console.log('已经获取了客座率数据:', loadFactorData);
                 } catch (error) {
                     console.error('发生错误：', error);
                 }
@@ -2359,7 +2380,34 @@
                 return '';
             },
 
-            setCommandTimes: function(jobId) {
+            constructCurrentDayDataParams: function(jobId) {
+                function formatNumber(num) {
+                    return num < 10 ? `0${num}` : num;
+                }
+
+                const today = new Date();
+                const year = today.getFullYear();
+                const month = formatNumber(today.getMonth() + 1);
+                const day = formatNumber(today.getDate());
+
+                const dateString = `${year}-${month}-${day}`;
+                const startCmdTime = `${dateString} 00:00:00`;
+                const endCmdTime = `${dateString} 23:59:59`;
+
+                return {
+                    page: 1,
+                    limit: 20,
+                    jobId: jobId,
+                    status: '',
+                    dataSource: 'mysql',
+                    startCmdTime: startCmdTime,
+                    endCmdTime: endCmdTime,
+                    isCmd: '',
+                    jobWarningType: ''
+                };
+            },
+
+            constructHistoricalDataParams: function(jobId) {
                 function formatMonth(month) {
                     return month < 9 ? `0${month + 1}` : `${month + 1}`;
                 }
@@ -3898,15 +3946,12 @@
                 const itemFltDate = new Date(item.fltDate);
                 itemFltDate.setHours(0, 0, 0, 0);
                 if (item.fltNo === targetFlight && itemFltDate.getTime() === targetDate.getTime()) {
-                    const loadFactor = item.loadFactor;
-                    const averageLoadFactor = item.averageLoadFactor;
-                    const revenue = item.revenue;
+                    const remark = JSON.parse(item.remark || '{}');
+                    const loadFactor = remark["去年同期客座率"];
+                    const percentage = (loadFactor * 100).toFixed(2);
 
                     content += `${horizontalLine}`;
-                    content += `<div>客座率: ${loadFactor}%</div>`;
-                    content += `<div>平均客座率: ${averageLoadFactor}%</div>`;
-                    content += `<div>收入: ${revenue}</div>`;
-                    content += `${horizontalLine}`;
+                    content += `<div>去年同期客座率: ${percentage}%</div>`;
                 }
             });
 
