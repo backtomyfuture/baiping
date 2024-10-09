@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.4
+// @version           1.0.7
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -182,6 +182,30 @@
 ### 2024-09-30
 - 优化功能：优化batchPolicy中的addNextStepButtonListener功能，现在点击“下一步”只删除页面表格中有的数据；
 
+## 版本 1.0.5
+### 2024-09-30
+- 优化功能：优化排除航班功能，新增点击非本航司的时候，弹出提示框；
+
+## 版本 1.0.6
+### 2024-10-03
+- 新增功能：新增了在客座率上显示额外信息的功能，涉及config、tooltipObserver、config、updateTooltipContent、indicesManager、dataEventManager模块的修改；
+
+## 版本 1.0.7
+### 2024-10-03
+- 新增功能：batchPolicy模块，在发起调价界面新增了一个舱位的下拉菜单；
+
+### 2024-10-08
+- 优化功能：batchPolicy模块，舱位的下拉菜单新增公务舱；
+- 优化功能：menuManager，优化了showDialog，增加了取消的回调函数；
+
+### 2024-10-09
+- 新增功能：batchPolicy模块，新增填充表格过程中出现错误，弹出一个提示，可以跳过当前行并继续；
+- 新增功能：batchPolicy模块，新增填充表格出现错误，最后弹出一个错误问题汇总，并可以让用户先选择是否保留；
+- 优化功能：batchPolicy模块，给localStorage编辑锁设置一个超时时间（最后整体去掉了lock机制）；
+- 新增功能：config模块，新增了GS、HU关于批量政策提报的选项；
+- 新增功能：config模块，新增了GS、HU关于批量AVJ舱位显示顺序；
+
+
 
 */
 
@@ -328,7 +352,49 @@
                 DATE_FLIGHT: 'dateFlight',
                 ECONOMIC_PRICE: 'economicPrice',
                 BUSINESS_PRICE: 'businessPrice',
+                LOAD_FACTOR: 'loadFactor',
                 OTHER: 'other'
+            },
+
+            cabinRanges: {
+                'GS': {
+                    'business': ['D', 'I'],
+                    'Y-N': ['Y', 'B', 'H', 'K', 'L', 'M', 'X', 'V', 'N'],
+                    'A-U': ['A', 'U'],
+                    'T-P': ['T', 'P']
+                },
+                'HU': {
+                    // 这里填入 HU 的配置，例如：
+                    'business': ['D','Z','I', 'R'],
+                    'Y-N': ['Y', 'H','K','L', 'M', 'X','V'],
+                    'A-T': ['A', 'U','T'],
+                }
+                // 可以添加其他航空公司的配置
+            },
+
+            dropdownOptions: {
+                'GS': [
+                    { value: 'all', text: '全部' },
+                    { value: 'business', text: '公务舱' },
+                    { value: 'Y-N', text: 'Y-N舱' },
+                    { value: 'A-U', text: 'A-U舱' },
+                    { value: 'T-P', text: 'T-P舱' }
+                ],
+                'HU': [
+                    { value: 'all', text: '全部' },
+                    { value: 'business', text: '公务舱' },
+                    { value: 'Y-N', text: 'Y-N舱' },
+                    { value: 'A-T', text: 'A-T舱' }
+                ]
+            },
+
+            specifiedHeaders: {
+                'GS': [
+                    "航班日期", "航段", "航班号", "C", "D", "I", "R", "J", "W", "E", "Y", "B", "H", "K", "L", "M", "X", "V", "N", "Q", "A", "U", "T", "P", "Z", "F", "S", "G", "O"
+                ],
+                'HU':[
+                    "航班日期", "航段", "航班号", "C", "D", "Z", "I", "R", "J", "Y", "Q", "E", "H", "K", "L", "M", "X", "V", "N", "P", "A", "U", "T", "B", "S", "G", "O"
+                ],
             },
 
             // 菜单项配置
@@ -352,6 +418,13 @@
                     text: '同期数据显示',
                     hasCheckbox: true,
                     storageKey: 'k_syncDisplay',
+                    defaultValue: true
+                },
+                {
+                    id: 'loadFactor',
+                    text: '历史客座率显示',
+                    hasCheckbox: true,
+                    storageKey: 'k_loadFactorDisplay',
                     defaultValue: true
                 },
                 {
@@ -827,9 +900,26 @@
         // 菜单项处理函数
         function handleAdjustInterval(item) {
             toggleMenu('hide');
-            showDialog(item.text, "建议间隔50秒", "Go", () => {
-                // 处理调整间隔逻辑
-            }, "input", core.gv(item.storageKey, item.defaultValue));
+            showDialog(
+                item.text,
+                "建议间隔50秒",
+                "Go",
+                (dialog) => {
+                    const inputElement = core.$('#msg', dialog);
+                    const newInterval = inputElement ? parseInt(inputElement.value, 10) : null;
+                    if (newInterval && !isNaN(newInterval)) {
+                        core.sv(item.storageKey, newInterval);
+                        console.log(`间隔已更新为 ${newInterval} 秒`);
+                        // 这里可以添加其他需要执行的逻辑
+                    } else {
+                        console.log('无效的输入，使用默认值');
+                        core.sv(item.storageKey, item.defaultValue);
+                    }
+                },
+                () => {},
+                "input",
+                core.gv(item.storageKey, item.defaultValue)
+            );
         }
 
         function handleCheckUpdate() {
@@ -861,9 +951,16 @@
             }
         }
 
-        function showDialog(title = 'HNA网络收益平台', content = '', buttonvalue = '确定', buttonfun = function(t) {return t;}, inputtype = 'br', inputvalue = '') {
+        function showDialog(title = 'HNA网络收益平台', content = '', buttonvalue = '确定', buttonfun = function(t) {return t;}, cancelFun = function(t) {return t;}, inputtype = 'br', inputvalue = '') {
             const ndivalert = document.createElement('div');
             ndivalert.setAttribute("class", "ant-modal-root");
+
+            let bodyContent = `<p class="dark:text-gray-100 mt-2 text-gray-500 text-sm" style="margin-bottom: 0.6rem;">${content}</p>`;
+
+            if (inputtype === 'tb' && inputvalue) {
+                bodyContent += generateTable(inputvalue);
+            }
+
             ndivalert.innerHTML = `
     <div class="ant-modal-mask"></div>
     <div tabindex="-1" class="ant-modal-wrap">
@@ -883,26 +980,26 @@
                     <div class="ant-modal-title" id="rc_unique_4">${title}</div>
                 </div>
                 <div class="ant-modal-body">
-                    <p class="dark:text-gray-100 mt-2 text-gray-500 text-sm" style="margin-bottom: 0.6rem;">${content}</p>
+                    ${bodyContent}
                     <form class="ant-form ant-form-horizontal">
-                        <div class="ant-form-item">
+                        <div class="ant-form-item" ${inputtype === 'tb' ? 'style="display:none;"' : ''}>
                             <div class="ant-row ant-form-item-row">
                                 <div class="ant-col ant-form-item-control">
                                     <div class="ant-form-item-control-input">
                                         <div class="ant-form-item-control-input-content">
-                                            <${inputtype} rows="4" id="msg" class="ant-input" placeholder="${inputvalue}"></${inputtype}>
+                                            <${inputtype === 'tb' ? 'div' : inputtype} rows="4" id="msg" class="ant-input" ${inputtype !== 'tb' ? `placeholder="${inputvalue}"` : ''}></${inputtype === 'tb' ? 'div' : inputtype}>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="ant-form-item">
+                        <div class="ant-form-item" style="margin-top: 20px;">
                             <div class="ant-row ant-form-item-row">
-                                <div class="ant-col ant-col-offset-9 ant-form-item-control">
+                                <div class="ant-col ant-col-24 ant-form-item-control" style="text-align: right;">
                                     <div class="ant-form-item-control-input">
                                         <div class="ant-form-item-control-input-content">
                                             <button type="button" class="ant-btn ant-btn-default" style="margin-right: 15px;"><span>取 消</span></button>
-                                            <button type="submit" class="ant-btn ant-btn-primary"><span>${buttonvalue}</span></button>
+                                            <button type="button" class="ant-btn ant-btn-primary"><span>${buttonvalue}</span></button>
                                         </div>
                                     </div>
                                 </div>
@@ -914,34 +1011,78 @@
             <div tabindex="0" aria-hidden="true" style="width: 0px; height: 0px; overflow: hidden; outline: none;"></div>
         </div>
     </div>
-`;
+    `;
+
             if (inputtype === 'br') {
                 core.$(".ant-input", ndivalert).parentElement.style.display = 'none';
             } else if (inputtype === 'img') {
                 core.$(".ant-input", ndivalert).src = inputvalue;
                 core.$(".ant-input", ndivalert).style = `max-height: 19rem; height: unset; display: block; margin: 0 auto;`;
-                //$(".kdialogwin", ndivalert).style = `max-width: 37.5rem;`;
             } else if (inputtype === 'textarea') {
                 core.$(".ant-input", ndivalert).value = inputvalue;
                 core.$(".ant-input", ndivalert).style = `max-height: 19rem; height: 10rem; display: block; margin: 0 auto; width: 100%; white-space: pre;`;
-                //$(".kdialogwin", ndivalert).style = `max-width: 100%;`;
-                //$(".kdialogwin .kwidth", ndivalert).style = `min-width: 28rem;`;
-            }else {
+            } else if (inputtype === 'tb') {
+                const modalContent = ndivalert.querySelector('.ant-modal-content');
+                modalContent.style.width = '80%';
+                modalContent.style.maxWidth = '800px';
+
+                const table = ndivalert.querySelector('table');
+                if (table) {
+                    table.style.marginBottom = '20px';
+                }
+            } else {
                 core.$(".ant-input", ndivalert).value = inputvalue;
             }
+
             core.$(".ant-modal-close", ndivalert).onclick = function() {
+                cancelFun(ndivalert);
                 ndivalert.remove();
             };
             core.$(".ant-btn.ant-btn-default", ndivalert).onclick = function() {
+                cancelFun(ndivalert);
                 ndivalert.remove();
             };
             core.$(".ant-btn.ant-btn-primary", ndivalert).onclick = function() {
                 buttonfun(ndivalert);
-                core.$(".ant-modal-close", ndivalert).onclick();
+                ndivalert.remove();
             };
-            document.body.appendChild(ndivalert);
 
-        };
+            // 添加表单提交事件处理
+            core.$("form", ndivalert).onsubmit = function(e) {
+                e.preventDefault(); // 阻止表单默认提交行为
+                buttonfun(ndivalert);
+            };
+
+            document.body.appendChild(ndivalert);
+        }
+
+        // 保持 generateTable 函数不变
+        function generateTable(data) {
+            if (!data || !data.headers || !data.rows) return '';
+
+            let tableHtml = '<table class="ant-table-content" style="width:100%; border-collapse: collapse;">';
+
+            // 添加表头
+            tableHtml += '<thead class="ant-table-thead"><tr>';
+            data.headers.forEach(header => {
+                tableHtml += `<th class="ant-table-cell" style="padding: 10px; border: 1px solid #f0f0f0; background-color: #fafafa;">${header}</th>`;
+            });
+            tableHtml += '</tr></thead>';
+
+            // 添加表格内容
+            tableHtml += '<tbody class="ant-table-tbody">';
+            data.rows.forEach(row => {
+                tableHtml += '<tr>';
+                row.forEach(cell => {
+                    tableHtml += `<td class="ant-table-cell" style="padding: 10px; border: 1px solid #f0f0f0;">${cell}</td>`;
+                });
+                tableHtml += '</tr>';
+            });
+            tableHtml += '</tbody>';
+
+            tableHtml += '</table>';
+            return tableHtml;
+        }
 
         function showAboutDialog() {
             const aboutContent = `
@@ -1189,6 +1330,7 @@
         // 公共接口
         return {
             init: init,
+            showDialog: showDialog,
         };
     });
 
@@ -1204,6 +1346,7 @@
             let dateFlightIndex = -1;
             let economicPriceIndex = -1;
             let businessPriceIndex = -1;
+            let loadFactorIndex = -1;
 
             headerCells.forEach((cell, index) => {
                 const cellText = cell.textContent.trim();
@@ -1213,13 +1356,16 @@
                     economicPriceIndex = index;
                 } else if (cellText.includes('最低公务舱价格')) {
                     businessPriceIndex = index;
+                } else if (cellText.includes('客座率')) {
+                    loadFactorIndex = index;
                 }
             });
 
             return {
                 dateFlightIndex_origin: dateFlightIndex,
                 economicPriceIndex_origin: economicPriceIndex,
-                businessPriceIndex_origin: businessPriceIndex
+                businessPriceIndex_origin: businessPriceIndex,
+                loadFactorIndex_origin: loadFactorIndex,
             };
         }
 
@@ -1272,11 +1418,12 @@
 
         // 提取共用的索引计算逻辑
         const calculateIndices = function(isFirstCellSpecial) {
-            const { dateFlightIndex_origin, economicPriceIndex_origin, businessPriceIndex_origin } = state.globalIndices;
+            const { dateFlightIndex_origin, economicPriceIndex_origin, businessPriceIndex_origin, loadFactorIndex_origin } = state.globalIndices;
             return {
                 dateFlightIndex: isFirstCellSpecial ? dateFlightIndex_origin : dateFlightIndex_origin - 1,
                 economicPriceIndex: isFirstCellSpecial ? economicPriceIndex_origin : economicPriceIndex_origin - 1,
-                businessPriceIndex: isFirstCellSpecial ? businessPriceIndex_origin : businessPriceIndex_origin - 1
+                businessPriceIndex: isFirstCellSpecial ? businessPriceIndex_origin : businessPriceIndex_origin - 1,
+                loadFactorIndex: isFirstCellSpecial ? loadFactorIndex_origin : loadFactorIndex_origin - 1,
             };
         }
 
@@ -1288,7 +1435,7 @@
         };
     });
 
-    ModuleSystem.define('apiHookManager', ['core', 'state'], function(core, state) {
+    ModuleSystem.define('apiHookManager', ['core', 'state', 'config'], function(core, state, config) {
 
         function HookXMLHttpRequest() {
 
@@ -1335,9 +1482,10 @@
             }
 
             function mergeResults(results) {
-                const specifiedHeaders = [
-                    "航班日期", "航段", "航班号", "C", "D", "I", "R", "J", "W", "E", "Y", "B", "H", "K", "L", "M", "X", "V", "N", "Q", "A", "U", "T", "P", "Z", "F", "S", "G", "O"
-                ];
+
+                const userInfo = state.userInfo;
+                const airCompony = userInfo.airCompony;
+                const specifiedHeaders = config.specifiedHeaders[airCompony] || config.dropdownOptions.GS;
 
                 // 使用 Set 来存储唯一的 headers
                 const unifiedHeadersSet = new Set(specifiedHeaders);
@@ -1763,7 +1911,7 @@
                                 sessionStorage.setItem('excludeFlightInfo', JSON.stringify(currentFlightInfo));
                                 sessionStorage.setItem('currentModule', JSON.stringify(moduleData.module));
                                 sessionStorage.setItem('currentJob', JSON.stringify(job));
-                            }
+                            } else window.top.message.warning('外航航司无法排除');
                             removeAllCustomMenus();
 
                         });
@@ -1966,10 +2114,12 @@
                     state.PriceList = null;
                     state.currentFlightInfo = null;
 
-
                 }
                 if (core.isFeatureEnabled("k_syncDisplay")) {
                     dataFetcher.fetchSyncDateData();
+                }
+                if (core.isFeatureEnabled("k_loadFactorDisplay")) {
+                    dataFetcher.fetchLoadFactorData();
                 }
             }
         };
@@ -2152,7 +2302,7 @@
                     const startFltDate = core.$('input[placeholder="开始日期"]').value;
                     const endFltDate = core.$('input[placeholder="结束日期"]').value;
 
-                    const params = this.setCommandTimes();
+                    const params = this.setCommandTimes('job_18992');
 
                     const url = `http://sfm.hnair.net/sfm-admin/im/autoimlog/list?limit=${params.limit}&jobId=${params.jobId}&origin=${encodeURIComponent(depCityCode)}&dest=${encodeURIComponent(arrCityCode)}&status=${encodeURIComponent(params.status)}&dataSource=${encodeURIComponent(params.dataSource)}&startFltDate=${encodeURIComponent(startFltDate)}&endFltDate=${encodeURIComponent(endFltDate)}&startCmdTime=${encodeURIComponent(params.startCmdTime)}&endCmdTime=${encodeURIComponent(params.endCmdTime)}&isCmd=${encodeURIComponent(params.isCmd)}&jobWarningType=${encodeURIComponent(params.jobWarningType)}`;
                     const headers = {
@@ -2163,6 +2313,36 @@
                     const additionalData = await this.fetchPaginatedData(url, headers);
                     state.globalAdditionalData = additionalData;
                     console.log('已经获取了历史航线平均价格数据:', additionalData);
+                } catch (error) {
+                    console.error('发生错误：', error);
+                }
+            },
+
+            fetchLoadFactorData: async function() {
+                try {
+                    const userInfo = state.userInfo;
+                    const { token: authorizationToken } = userInfo;
+
+                    const cityCodeText = this.getCityCodeText();
+                    if (!cityCodeText) return;
+
+                    const depCityCode = cityCodeText.substring(0, 3).toUpperCase();
+                    const arrCityCode = cityCodeText.substring(3, 6).toUpperCase();
+
+                    const startFltDate = core.$('input[placeholder="开始日期"]').value;
+                    const endFltDate = core.$('input[placeholder="结束日期"]').value;
+
+                    const params = this.setCommandTimes('job_18992');
+
+                    const url = `http://sfm.hnair.net/sfm-admin/im/autoimlog/list?limit=${params.limit}&jobId=${params.jobId}&origin=${encodeURIComponent(depCityCode)}&dest=${encodeURIComponent(arrCityCode)}&status=${encodeURIComponent(params.status)}&dataSource=${encodeURIComponent(params.dataSource)}&startFltDate=${encodeURIComponent(startFltDate)}&endFltDate=${encodeURIComponent(endFltDate)}&startCmdTime=${encodeURIComponent(params.startCmdTime)}&endCmdTime=${encodeURIComponent(params.endCmdTime)}&isCmd=${encodeURIComponent(params.isCmd)}&jobWarningType=${encodeURIComponent(params.jobWarningType)}`;
+                    const headers = {
+                        'Accept': 'application/json, text/plain, */*',
+                        'X-Authorization': authorizationToken
+                    };
+
+                    const loadFactorData = await this.fetchPaginatedData(url, headers);
+                    state.globalLoadFactorData = loadFactorData;
+                    console.log('已经获取了历史客座率数据:', loadFactorData);
                 } catch (error) {
                     console.error('发生错误：', error);
                 }
@@ -2179,7 +2359,7 @@
                 return '';
             },
 
-            setCommandTimes: function() {
+            setCommandTimes: function(jobId) {
                 function formatMonth(month) {
                     return month < 9 ? `0${month + 1}` : `${month + 1}`;
                 }
@@ -2205,7 +2385,7 @@
 
                 return {
                     limit: 20,
-                    jobId: 'job_18992',
+                    jobId: jobId,
                     status: '',
                     dataSource: 'clickHouse',
                     startCmdTime: startCmdTime,
@@ -2477,7 +2657,7 @@
         };
     });
 
-    ModuleSystem.define('batchPolicy', ['core', 'state', 'uiOperations'], function(core, state, uiOperations) {
+    ModuleSystem.define('batchPolicy', ['core', 'state', 'uiOperations', 'menuManager', 'config'], function(core, state, uiOperations, menuManager, config) {
 
         if (!core.isFeatureEnabled("k_bulkCabinChange")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -2485,7 +2665,6 @@
 
         // 私有变量
         const STORAGE_KEY = 'cabinPricePolicyStorage';
-        const EDIT_LOCK_KEY = 'cabinPricePolicyEditLock';
 
         // 私有函数
         function getCabinPricePolicyStorage() {
@@ -2496,45 +2675,18 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         }
 
-
-        function setEditLock() {
-            localStorage.setItem(EDIT_LOCK_KEY, 'true');
-        }
-
-        function releaseEditLock() {
-            localStorage.removeItem(EDIT_LOCK_KEY);
-        }
-
-        function isEditLocked() {
-            return localStorage.getItem(EDIT_LOCK_KEY) === 'true';
-        }
-
         function updateCabinPricePolicy(flightNumber, date, segment, cabin, newPrice) {
 
-            if (isEditLocked()) {
-                window.top.message.warning("另一个窗口正在编辑，请稍后再试");
-                return;
-            }
+            const storage = getCabinPricePolicyStorage();
+            const segmentCode = segment.substring(0, 6);
 
-            setEditLock();
+            if (!storage[segmentCode]) storage[segmentCode] = {};
+            if (!storage[segmentCode][flightNumber]) storage[segmentCode][flightNumber] = {};
+            if (!storage[segmentCode][flightNumber][date]) storage[segmentCode][flightNumber][date] = {};
 
-            try {
-                const storage = getCabinPricePolicyStorage();
-                const segmentCode = segment.substring(0, 6);
-
-                if (!storage[segmentCode]) storage[segmentCode] = {};
-                if (!storage[segmentCode][flightNumber]) storage[segmentCode][flightNumber] = {};
-                if (!storage[segmentCode][flightNumber][date]) storage[segmentCode][flightNumber][date] = {};
-
-                storage[segmentCode][flightNumber][date][cabin] = newPrice;
-                saveCabinPricePolicyStorage(storage);
-                console.log(`Updated price for ${segmentCode} ${flightNumber} ${date} ${cabin}: ${newPrice}`);
-            } catch (error) {
-                console.error('Error updating cabin price policy:', error);
-                window.top.message.error("更新舱位价格策略时出错");
-            } finally {
-                releaseEditLock();
-            }
+            storage[segmentCode][flightNumber][date][cabin] = newPrice;
+            saveCabinPricePolicyStorage(storage);
+            console.log(`Updated price for ${segmentCode} ${flightNumber} ${date} ${cabin}: ${newPrice}`);
         }
 
         function fetchInitialCellValues() {
@@ -2572,23 +2724,85 @@
         }
 
         async function addBatchButton() {
-
             const targetModal = core.$('.react-draggable .ant-modal-content');
             if (!targetModal) return;
 
             const container = targetModal.querySelector('.ant-row[style*="justify-content: flex-end;"]');
             if (!container || container.querySelector('.batch-add-button')) return;
 
-            const batchButton = document.createElement('button');
-            batchButton.type = 'button';
-            batchButton.className = 'ant-btn ant-btn-primary batch-add-button';
-            batchButton.style.marginRight = '20px';
-            batchButton.innerHTML = '<span>批量添加</span>';
+            const buttonGroup = document.createElement('div');
+            buttonGroup.style.display = 'flex';
+            buttonGroup.style.alignItems = 'center';
+            buttonGroup.style.gap = '8px'; // 添加间距
+
+            const dropdown = createDropdownMenu();
+            const batchButton = createbatchButton();
+            const spacer = createSpacer();
+
+            buttonGroup.appendChild(batchButton);
+            buttonGroup.appendChild(dropdown);
+            buttonGroup.appendChild(spacer);
 
             batchButton.addEventListener('click', handleBatchAddClick);
             addNextStepButtonListener();
 
-            container.appendChild(batchButton);
+            container.appendChild(buttonGroup);
+        }
+
+        function createbatchButton() {
+            const batchButton = document.createElement('button');
+            batchButton.type = 'button';
+            batchButton.className = 'ant-btn ant-btn-primary batch-add-button';
+            batchButton.style.height = '32px';
+            batchButton.style.padding = '0 15px';
+            batchButton.style.fontSize = '14px';
+            batchButton.style.lineHeight = '1';
+            batchButton.innerHTML = '<span>批量添加</span>';
+            return batchButton;
+        }
+
+        function createDropdownMenu() {
+            const dropdown = document.createElement('div');
+            dropdown.className = 'ant-select batch-filter-dropdown';
+
+            const select = document.createElement('select');
+            select.className = 'ant-select-selection-search-input';
+            select.id = 'batch-filter-select';
+            select.style.width = '70px';
+            select.style.height = '32px';
+            select.style.borderRadius = '2px';
+            select.style.border = '1px solid #d9d9d9';
+            select.style.padding = '0 8px';
+            select.style.fontSize = '14px';
+            select.style.appearance = 'none';
+            select.style.backgroundImage = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3E%3Cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'M6 8l4 4 4-4\'/%3E%3C/svg%3E")';
+            select.style.backgroundRepeat = 'no-repeat';
+            select.style.backgroundPosition = 'right 8px center';
+            select.style.backgroundSize = '16px';
+
+            const userInfo = state.userInfo;
+            const airCompony = userInfo.airCompony;
+            const options = config.dropdownOptions[airCompony] || config.dropdownOptions.GS;
+
+            options.forEach(option => {
+                const optionElement = document.createElement('option');
+                optionElement.value = option.value;
+                optionElement.textContent = option.text;
+                select.appendChild(optionElement);
+            });
+
+            dropdown.appendChild(select);
+            return dropdown;
+        }
+
+        function createSpacer() {
+            const spacer = document.createElement('button');
+            spacer.type = 'button';
+            spacer.className = 'ant-btn ant-btn-primary batch-add-button';
+            spacer.style.width = '1px';
+            spacer.style.height = '32px';
+            spacer.style.backgroundColor = 'transparent';
+            return spacer;
         }
 
         async function handleBatchAddClick() {
@@ -2610,39 +2824,280 @@
             }
 
             const cabinPricePolicyStorage = getCabinPricePolicyStorage();
+            const selectedOption = document.getElementById('batch-filter-select').value;
+            const filteredItems = filterCabinPricePolicy(cabinPricePolicyStorage, selectedOption);
+
+            let shouldContinue = true;
             let totalUpdates = 0;
             let failedUpdates = 0;
 
-            if (Object.keys(cabinPricePolicyStorage).length > 0) {
-                const firstRowCheckbox = tableBody.querySelector('.ant-table-row.ant-table-row-level-0 .ant-table-cell.ant-table-selection-column input[type="checkbox"]');
-                if (firstRowCheckbox) {
+            const errorLogger = new ErrorLogger();
+            let processedCount = 0;
+            const batchSize = 10; // 每批处理的项目数
+
+            window.top.message.warning('开始批量呈报，请勿移动和点击鼠标、键盘');
+            await core.delay(800);
+
+            // 选中第一行复选框
+            const firstRowCheckbox = tableBody.querySelector('.ant-table-row.ant-table-row-level-0 .ant-table-cell.ant-table-selection-column input[type="checkbox"]');
+            if (firstRowCheckbox) {
+                if (!firstRowCheckbox.checked) {
                     firstRowCheckbox.click();
-                    await core.delay(200); // 等待复选框状态更新
+                    await core.delay(200);
+                }
+            }
+
+            while (processedCount < filteredItems.length) {
+                const batchItems = filteredItems.slice(processedCount, processedCount + batchSize);
+                await processBatch(batchItems, tableBody, errorLogger);
+                processedCount += batchSize;
+
+                // 更新进度
+                const progress = Math.min(100, Math.round((processedCount / filteredItems.length) * 100));
+
+                // 给 UI 一个更新的机会
+                await core.delay(0);
+            }
+
+            const report = errorLogger.generateReport();
+            // 只有在有错误时才显示错误报告
+            if (report.errors && report.errors.length > 0) {
+                showErrorReport(report);
+            } else {
+                window.top.message.success('所有项目添加成功');
+            }
+        }
+
+        async function processBatch(batchItems, tableBody, errorLogger) {
+            for (const item of batchItems) {
+                try {
+                    await addNewRow(tableBody, item);
+                    errorLogger.logSuccess();
+                } catch (error) {
+                    errorLogger.logError(item, error);
+                    const shouldContinue = await showErrorAndAskToContinue(item, error);
+                    if (!shouldContinue) {
+                        throw new Error('用户选择停止添加过程');
+                    }
+                    await handleErrorAndContinue(tableBody);
+                }
+            }
+        }
+
+        class ErrorLogger {
+            constructor() {
+                this.errors = [];
+                this.successCount = 0;
+            }
+
+            logError(item, error) {
+                this.errors.push({ item, error: error.message });
+            }
+
+            logSuccess() {
+                this.successCount++;
+            }
+
+            generateReport() {
+                return {
+                    totalCount: this.successCount + this.errors.length,
+                    successCount: this.successCount,
+                    errors: this.errors
+                };
+            }
+        }
+
+        function showErrorReport(report) {
+            const tableData = {
+                headers: ['序号', '航段', '航班号', '日期', '舱位', '价格'],
+                rows: report.errors.map((error, index) => [
+                    index + 1,
+                    error.item.segment,
+                    error.item.flightNumber,
+                    error.item.date,
+                    error.item.cabin,
+                    error.item.price
+                ])
+            };
+
+            const content = `
+        <div>
+            <p>下面表格为批量填报政策过程中出问题的项目，点击“取消”会保留，建议删除并重新呈报。</p>
+        </div>
+    `;
+
+            menuManager.showDialog(
+                '错误信息报告',
+                content,
+                '删除',
+                function(dialog) {
+                    clearErrorItems(report.errors);
+                    dialog.remove();
+                },
+                function(dialog) {
+                    dialog.remove();
+                },
+                'tb',
+                tableData
+            );
+        }
+
+        function clearErrorItems(errors) {
+            let storage = getCabinPricePolicyStorage();
+            storage = batchCleanupStorageData(storage, errors.map(error => error.item));
+            saveCabinPricePolicyStorage(storage);
+            console.log('已从 cabinPricePolicyStorage 中删除错误项');
+            window.top.message.success('错误信息已清除');
+        }
+
+        async function handleErrorAndContinue(tableBody) {
+            try {
+                const rows = tableBody.querySelectorAll('tr.ant-table-row');
+                if (rows.length < 2) {
+                    console.warn('表格行数不足，无法执行操作');
+                    return;
                 }
 
-                for (const segment in cabinPricePolicyStorage) {
-                    for (const flightNumber in cabinPricePolicyStorage[segment]) {
-                        for (const date in cabinPricePolicyStorage[segment][flightNumber]) {
-                            for (const cabin in cabinPricePolicyStorage[segment][flightNumber][date]) {
-                                const price = cabinPricePolicyStorage[segment][flightNumber][date][cabin];
-                                try {
-                                    await addNewRow(tableBody, { segment, flightNumber, date, cabin, price });
-                                    totalUpdates++;
-                                    await core.delay(200); // 在每次添加行后增加延迟，确保UI更新
-                                } catch (error) {
-                                    console.error(`添加行失败: ${segment} ${flightNumber} ${date} ${cabin}`, error);
-                                    failedUpdates++;
-                                }
+                // 1. 取消勾选第一行的 checkbox
+                const firstRowCheckbox = rows[0].querySelector('.ant-table-cell.ant-table-selection-column input[type="checkbox"]');
+                if (firstRowCheckbox && firstRowCheckbox.checked) {
+                    firstRowCheckbox.click();
+                    await core.delay(100);
+                }
+
+                // 2. 勾选最后一行的 checkbox
+                const lastRowCheckbox = rows[rows.length - 1].querySelector('.ant-table-cell.ant-table-selection-column input[type="checkbox"]');
+                if (lastRowCheckbox && !lastRowCheckbox.checked) {
+                    lastRowCheckbox.click();
+                    await core.delay(100);
+                }
+
+                // 3. 点击整个面板中的删除按钮
+                const deleteButtons = tableBody.closest('.ant-modal-content').querySelectorAll('button.ant-btn.ant-btn-primary');
+                const deleteButton = Array.from(deleteButtons).find(button => button.textContent.includes('删'));
+                if (deleteButton) {
+                    deleteButton.click();
+                    await core.delay(200); // 增加延迟，确保删除操作完成
+                } else {
+                    console.warn('未找到包含"删"字的删除按钮');
+                }
+
+                // 4. 重新勾选第一行的 checkbox
+                if (firstRowCheckbox && !firstRowCheckbox.checked) {
+                    firstRowCheckbox.click();
+                    await core.delay(100);
+                }
+
+            } catch (error) {
+                console.error('处理错误并继续时出现问题:', error);
+                window.top.message.error('处理错误时出现问题，请手动检查表格');
+            }
+        }
+
+        function showErrorAndAskToContinue(item, error) {
+            return new Promise((resolve) => {
+                const errorMessage = `添加行失败,是否跳过此行并继续添加其他行？`;
+                const tableData = {
+                    headers: ['航段', '航班号', '日期', '舱位', '价格'],
+                    rows: [
+                        [item.segment, item.flightNumber, item.date, item.cabin, item.price]
+                    ]
+                };
+
+                menuManager.showDialog(
+                    '错误',
+                    errorMessage,
+                    '跳过并继续',
+                    function(dialog) {
+                        resolve(true);
+                        dialog.remove();
+                    },
+                    function(dialog) {
+                        resolve(false);
+                        dialog.remove();
+                    },
+                    'tb',
+                    tableData
+                );
+            });
+        }
+
+        function filterCabinPricePolicy(storage, option) {
+
+            const userInfo = state.userInfo;
+            const airCompony = userInfo.airCompony;
+
+            const items = [];
+            const cabinRanges = config.cabinRanges[airCompony] || config.cabinRanges.GS; // 默认使用 GS 的配置
+            const selectedCabins = option === 'all' ? null : new Set(cabinRanges[option]);
+
+            for (const segment in storage) {
+                for (const flightNumber in storage[segment]) {
+                    for (const date in storage[segment][flightNumber]) {
+                        for (const cabin in storage[segment][flightNumber][date]) {
+                            if (!selectedCabins || selectedCabins.has(cabin)) {
+                                items.push({
+                                    segment,
+                                    flightNumber,
+                                    date,
+                                    cabin,
+                                    price: storage[segment][flightNumber][date][cabin]
+                                });
                             }
                         }
                     }
                 }
             }
+            return items;
+        }
 
-            console.log(`添加了 ${totalUpdates} 个舱位价格更新到表格中, ${failedUpdates} 个失败`);
-            if (failedUpdates > 0) {
-                window.top.message.warning(`${failedUpdates} 个舱位价格更新失败，请检查日志`);
+        function cleanupStorageData(storage, itemToRemove) {
+            const { segment, flightNumber, date, cabin } = itemToRemove;
+            const storageDate = date.replace(/-/g, '/');
+
+            if (storage[segment] &&
+                storage[segment][flightNumber] &&
+                storage[segment][flightNumber][storageDate]) {
+                delete storage[segment][flightNumber][storageDate][cabin];
+
+                // 清理空对象
+                if (Object.keys(storage[segment][flightNumber][storageDate]).length === 0) {
+                    delete storage[segment][flightNumber][storageDate];
+                }
+                if (Object.keys(storage[segment][flightNumber]).length === 0) {
+                    delete storage[segment][flightNumber];
+                }
+                if (Object.keys(storage[segment]).length === 0) {
+                    delete storage[segment];
+                }
             }
+            return storage;
+        }
+
+        function batchCleanupStorageData(storage, itemsToRemove) {
+            itemsToRemove.forEach(item => {
+                storage = cleanupStorageData(storage, item);
+            });
+            return storage;
+        }
+
+        function getAddedItemsFromTable(modalContent) {
+            const tableRows = modalContent.querySelectorAll('.ant-table-tbody tr');
+            return Array.from(tableRows).reduce((acc, row) => {
+                const cells = row.querySelectorAll('.ant-table-cell');
+                if (cells.length >= 10) {
+                    const item = {
+                        segment: (cells[3].textContent + cells[4].textContent) || '',
+                        flightNumber: cells[5].textContent || '',
+                        date: (cells[9].textContent || '').replace(/\//g, '-'),
+                        cabin: cells[7].textContent || ''
+                    };
+                    if (item.segment && item.flightNumber && item.date && item.cabin) {
+                        acc.push(item);
+                    }
+                }
+                return acc;
+            }, []);
         }
 
         function addNextStepButtonListener() {
@@ -2657,53 +3112,12 @@
 
             if (nextStepButton) {
                 nextStepButton.addEventListener('click', () => {
-                    const tableRows = modalContent.querySelectorAll('.ant-table-tbody tr');
-                    const addedItems = Array.from(tableRows).reduce((acc, row) => {
-                        const cells = row.querySelectorAll('.ant-table-cell');
-                        if (cells.length >= 10) { // 确保行有足够的单元格
-                            const item = {
-                                segment: (cells[3].textContent + cells[4].textContent) || '',
-                                flightNumber: cells[5].textContent || '',
-                                date: (cells[9].textContent || '').replace(/\//g, '-'),
-                                cabin: cells[7].textContent || ''
-                            };
-                            // 只有当所有必要的字段都有值时才添加这一项
-                            if (item.segment && item.flightNumber && item.date && item.cabin) {
-                                acc.push(item);
-                            }
-                        }
-                        return acc;
-                    }, []);
-
-                    //console.log('addedItems', addedItems);
-
-                    const storage = getCabinPricePolicyStorage();
-
-                    addedItems.forEach(item => {
-                        // 转换日期格式以匹配 localStorage 中的格式
-                        const storageDate = item.date.replace(/-/g, '/');
-
-                        if (storage[item.segment] &&
-                            storage[item.segment][item.flightNumber] &&
-                            storage[item.segment][item.flightNumber][storageDate]) {
-                            delete storage[item.segment][item.flightNumber][storageDate][item.cabin];
-
-                            // 清理空对象
-                            if (Object.keys(storage[item.segment][item.flightNumber][storageDate]).length === 0) {
-                                delete storage[item.segment][item.flightNumber][storageDate];
-                            }
-                            if (Object.keys(storage[item.segment][item.flightNumber]).length === 0) {
-                                delete storage[item.segment][item.flightNumber];
-                            }
-                            if (Object.keys(storage[item.segment]).length === 0) {
-                                delete storage[item.segment];
-                            }
-                        }
-                    });
-                    //console.log('storage', storage);
-
+                    const addedItems = getAddedItemsFromTable(modalContent);
+                    let storage = getCabinPricePolicyStorage();
+                    storage = batchCleanupStorageData(storage, addedItems);
                     saveCabinPricePolicyStorage(storage);
                     console.log('已从 cabinPricePolicyStorage 中删除添加到表格的数据');
+                    window.top.message.success('已清除暂存的政策');
                 });
             } else {
                 console.log('未找到"下一步"按钮');
@@ -3266,7 +3680,7 @@
         function getElementType(cell, row) {
             const cells = Array.from(row.children).filter(child => child.classList.contains('art-table-cell'));
             const isFirstCellSpecial = cells[0].classList.contains('first');
-            const { dateFlightIndex, economicPriceIndex, businessPriceIndex } = indicesManager.calculateIndices(isFirstCellSpecial);
+            const { dateFlightIndex, economicPriceIndex, businessPriceIndex, loadFactorIndex } = indicesManager.calculateIndices(isFirstCellSpecial);
 
             const cellIndex = cells.indexOf(cell);
 
@@ -3276,7 +3690,10 @@
                 return config.ELEMENT_TYPES.ECONOMIC_PRICE;
             } else if (cellIndex === businessPriceIndex) {
                 return config.ELEMENT_TYPES.BUSINESS_PRICE;
-            } else {
+            } else if (cellIndex === loadFactorIndex) { // 新增
+                return config.ELEMENT_TYPES.LOAD_FACTOR;
+            }
+            else {
                 return config.ELEMENT_TYPES.OTHER;
             }
         }
@@ -3473,6 +3890,29 @@
             return content;
         }
 
+        function processLoadFactorData(loadFactorData, targetFlight, targetDate) {
+            let content = '';
+            const horizontalLine = '<hr style="border: none; border-top: 1px solid white;">';
+
+            loadFactorData.forEach(item => {
+                const itemFltDate = new Date(item.fltDate);
+                itemFltDate.setHours(0, 0, 0, 0);
+                if (item.fltNo === targetFlight && itemFltDate.getTime() === targetDate.getTime()) {
+                    const loadFactor = item.loadFactor;
+                    const averageLoadFactor = item.averageLoadFactor;
+                    const revenue = item.revenue;
+
+                    content += `${horizontalLine}`;
+                    content += `<div>客座率: ${loadFactor}%</div>`;
+                    content += `<div>平均客座率: ${averageLoadFactor}%</div>`;
+                    content += `<div>收入: ${revenue}</div>`;
+                    content += `${horizontalLine}`;
+                }
+            });
+
+            return content;
+        }
+
         function getLowestPrice(cabinType, fetchedData, flightData, targetDate, today) {
 
             //console.log("Target Date:", targetDate);
@@ -3546,6 +3986,7 @@
 
             const fetchedData = state.globalFetchedData;
             const additionalData = state.globalAdditionalData;
+            const loadFactorData = state.globalLoadFactorData; // 新增
             const userInfo = state.userInfo;
             const { airCompony } = userInfo;
 
@@ -3581,6 +4022,11 @@
                         content += processSyncDatePriceData(additionalData, targetFlight, targetDate);
                         tooltipElement.innerHTML += content;
                     }
+                }
+                // 新增客座率处理逻辑
+                if (loadFactorData && elementType === config.ELEMENT_TYPES.LOAD_FACTOR) {
+                    content += processLoadFactorData(loadFactorData, targetFlight, targetDate);
+                    tooltipElement.innerHTML += content;
                 }
             } else {
                 if (fetchedData) {
