@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.8
+// @version           1.0.9
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -209,6 +209,11 @@
 ### 2024-10-09
 - 新增功能：修正了获取同期客座率数据的jobid以及构造参数，同时修改了实际显示的效果；
 
+## 版本 1.0.9
+### 2024-10-10
+- 优化功能：暂时去掉了"调整间隔"；
+- 优化功能：修改了部分菜单项的名称；
+- 优化功能：稍微优化了一下批量AVJ的启动逻辑；
 
 
 */
@@ -403,13 +408,13 @@
 
             // 菜单项配置
             menuItems: [
-                {
-                    id: 'adjustInterval',
-                    text: '调整间隔',
-                    hasCheckbox: false,
-                    storageKey: 'k_interval',
-                    defaultValue: 50
-                },
+                //{
+                //    id: 'adjustInterval',
+                //    text: '调整间隔',
+                //    hasCheckbox: false,
+                //    storageKey: 'k_interval',
+                //    defaultValue: 50
+                //},
                 {
                     id: 'priceDisplay',
                     text: '价差显示',
@@ -419,14 +424,14 @@
                 },
                 {
                     id: 'syncDisplay',
-                    text: '同期数据显示',
+                    text: '同期票价',
                     hasCheckbox: true,
                     storageKey: 'k_syncDisplay',
                     defaultValue: true
                 },
                 {
                     id: 'loadFactor',
-                    text: '历史客座率显示',
+                    text: '同期客座率',
                     hasCheckbox: true,
                     storageKey: 'k_loadFactorDisplay',
                     defaultValue: true
@@ -3517,11 +3522,11 @@
         }
 
         function init() {
-            const formElement = core.$("form.ant-form.ant-form-horizontal");
-            if (!formElement) return;
 
-            const rowContainer = core.$("div.ant-row[style='padding: 0px 24px;']");
-            if (!rowContainer || document.querySelector("#batchQueryButton")) return;
+            const rowContainer = core.$("form.ant-form.ant-form-horizontal div.ant-row[style='padding: 0px 24px;']");
+            if (!rowContainer) return;
+
+            if (core.$("#batchQueryButton")) return;
 
             const elementToRemove = core.$("div.ant-col.ant-col-2[style='padding-top: 5px;']");
             if (elementToRemove) elementToRemove.remove();
