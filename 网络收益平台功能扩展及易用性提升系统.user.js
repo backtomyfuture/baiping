@@ -215,6 +215,11 @@
 - 优化功能：修改了部分菜单项的名称；
 - 优化功能：稍微优化了一下批量AVJ的启动逻辑；
 
+## 版本 1.0.10
+### 2024-10-12
+- 优化功能：controller模块增加了关于iframe的判断，减少压力；
+- 优化功能：修改了elementObserver中getFlightInfo中一个条件的判断（有可能有部分航线去不到airRout）；
+
 
 */
 
@@ -3522,23 +3527,27 @@
         }
 
         function init() {
+            requestAnimationFrame(() => {
 
-            const rowContainer = core.$("form.ant-form.ant-form-horizontal div.ant-row[style='padding: 0px 24px;']");
-            if (!rowContainer) return;
+                const existingButton = core.$("#batchQueryButton");
+                if (existingButton) return;
 
-            if (core.$("#batchQueryButton")) return;
+                const rowContainer = core.$("form.ant-form.ant-form-horizontal div.ant-row[style='padding: 0px 24px;']");
+                if (!rowContainer) return;
 
-            const elementToRemove = core.$("div.ant-col.ant-col-2[style='padding-top: 5px;']");
-            if (elementToRemove) elementToRemove.remove();
+                const elementToRemove = core.$("div.ant-col.ant-col-2[style='padding-top: 5px;']");
+                if (elementToRemove) elementToRemove.remove();
 
-            const existingElement = core.$("div.ant-col.ant-col-4[style='padding-top: 5px;']");
-            if (existingElement) existingElement.className = "ant-col ant-col-3";
+                const existingElement = core.$("div.ant-col.ant-col-4[style='padding-top: 5px;']");
+                if (existingElement) existingElement.className = "ant-col ant-col-3";
 
-            rowContainer.appendChild(createLabel());
-            rowContainer.appendChild(createSelectContainer());
-            rowContainer.appendChild(createBatchQueryButton());
+                rowContainer.appendChild(createLabel());
+                rowContainer.appendChild(createSelectContainer());
+                rowContainer.appendChild(createBatchQueryButton());
 
-            setupAntSelect();
+                setupAntSelect();
+
+            });
         }
 
         return {
@@ -3781,7 +3790,7 @@
 
             if (!matchedFlight) return null;
 
-            const airRoute = matchedFlight.airRoute.replace(/-/g, '');
+            const airRoute = matchedFlight?.airRoute?.replace(/-/g, '') ?? '';
 
             return {
                 date: date,
@@ -4124,27 +4133,70 @@
     ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver'],
                         function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver) {
 
+        // 确定当前环境
+        function determineEnvironment() {
+            const url = window.location.href;
+            if (url.includes('?onlyContent=1')) {
+                if (url.includes('PlaneAdapt')) {
+                    return 'planeAdaptIframe';
+                } else if (url.includes('ExcludeFlight')) {
+                    return 'excludeFlightIframe';
+                } else if (url.includes('LongInstruction')) {
+                    return 'longInstructionIframe';
+                }
+                // 可以继续添加其他 iframe 的判断
+            }
+            return 'mainPage';
+        }
+
+        // 根据环境选择初始化函数
+        function initByEnvironment(environment) {
+            switch(environment) {
+                case 'mainPage':
+                    //initMainPage();
+                    break;
+                case 'planeAdaptIframe':
+                    indicesManager.init();
+                    break;
+                case 'excludeFlightIframe':
+                    //initExcludeFlightIframe();
+                    break;
+                case 'longInstructionIframe':
+                    batchAVJ.init();
+                    break;
+                default:
+                    console.log('Unknown environment');
+            }
+        }
+
         function loadDefaultAction() {
             // 初始化其他不依赖 MutationObserver 的模块...
             menuManager.init();
             apiHookManager.init();
-            indicesManager.init();
+
         }
 
-        function initObserver() {
+        function initObserver(environment) {
             const observer = new MutationObserver((mutations, obs) => {
                 const hasAddedNodes = mutations.some(mutation => mutation.addedNodes.length > 0);
                 if (hasAddedNodes) {
                     menuManager.init();
-                    enhanceUI.init();
                     enhanceUIWithContextMenu.init();
-                    dataEventManager.init(mutations);
-                    excludeFlight.init();
-                    batchPolicy.init();
-                    batchAVJ.init();
-                    tableFilterModule.init();
-                    elementObserver.init(mutations);
-                    tooltipObserver.init(mutations);
+                    switch(environment) {
+                        case 'planeAdaptIframe':
+                            enhanceUI.init();
+                            batchPolicy.init();
+                            elementObserver.init(mutations);
+                            tooltipObserver.init(mutations);
+                            dataEventManager.init(mutations);
+                            break;
+                        case 'excludeFlightIframe':
+                            excludeFlight.init();
+                            break;
+                        case 'longInstructionIframe':
+                            tableFilterModule.init();
+                            break;
+                    }
                 }
             });
 
@@ -4154,7 +4206,9 @@
         return {
             init: function() {
                 loadDefaultAction();
-                initObserver();
+                const environment = determineEnvironment();
+                initByEnvironment(environment);
+                initObserver(environment);
             }
         };
     });
