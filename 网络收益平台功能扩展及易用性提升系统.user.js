@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.11
+// @version           1.0.12
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -224,6 +224,12 @@
 ### 2024-10-12
 - 优化功能：右上角的预案最低舱改为了"无"；
 - 新增功能：点击航班的时候，会获取这个航班的预案，并替换右上角的预案文本；
+
+## 版本 1.0.12
+### 2024-10-14
+- 优化功能：右上角增加了一个判断，减少系统压力；
+- 优化功能：dataEventManager中给航班面板增加了一个绑定事件的属性，避免反复添加；
+- 优化功能：handleLayoutContentClick增加一个没数据，以及 获取失败的异常；
 
 
 
@@ -1798,7 +1804,14 @@
             const element = core.$(config.selectors.lowestCabinPlan);
             if (!element) return;
 
-            element.textContent = state.lowestCabin;
+            //console.log("element.textContent", element.textContent);
+            //console.log("state.lowestCabin", state.lowestCabin);
+
+            // 只有当文本内容不同时才更新
+            if (element.textContent !== state.lowestCabin) {
+                element.textContent = state.lowestCabin;
+            }
+
         }
 
         return {
@@ -2144,8 +2157,10 @@
 
             addTableEventListener: function() {
                 const tableElement = core.$('.art-table');
-                if (tableElement) {
+                if (tableElement && !tableElement.hasAttribute('click-getLowestCabin-added')) {
+                    console.log("给面板表格增加了点击事件");
                     tableElement.addEventListener('click', eventTrigger.handleLayoutContentClick);
+                    tableElement.setAttribute('click-getLowestCabin-added', 'true');
                 }
             },
         };
@@ -2192,30 +2207,47 @@
             },
 
             handleLayoutContentClick: function(event) {
-                console.log('行被点击，开始获取信息');
-                // 查找被点击的 .art-table-row 元素
+                //console.log('行被点击，开始获取信息');
+
+                // 使用 core.$ 来查找被点击的 .art-table-row 元素
                 const rowElement = event.target.closest('.art-table-row');
-                if (rowElement) {
-                    const flightInfo = elementObserver.getFlightInfo(rowElement);
-                    console.log('flightInfo', flightInfo);
-                    if (flightInfo) {
-                        dataFetcher.fetchLowestCabinPlan(flightInfo)
-                            .then(miniOpenCabins => {
-                            // 更新 state.lowestCabin
-                            if (miniOpenCabins !== null && miniOpenCabins !== undefined) {
-                                state.lowestCabin = miniOpenCabins;
-                                console.log('Updated state.lowestCabin:', state.lowestCabin);
-                            } else {
-                                state.lowestCabin = '无';
-                                console.log('No miniOpenCabins found, set state.lowestCabin to "无"');
-                            }
-                        })
-                            .catch(error => {
-                            console.error('Error fetching lowest cabin plan:', error);
-                        });
-                    }
+
+                if (!rowElement) {
+                    console.log('点击的不是表格行');
+                    return;
                 }
+
+                let flightInfo;
+                try {
+                    flightInfo = elementObserver.getFlightInfo(rowElement);
+                    if (!flightInfo) {
+                        console.log('未能获取到航班信息');
+                        return;
+                    }
+                } catch (error) {
+                    console.warn('获取航班信息时发生错误:', error);
+                    console.log('相关行元素:', rowElement);
+                    return;
+                }
+
+                console.log('获取到的航班信息:', flightInfo);
+
+                dataFetcher.fetchLowestCabinPlan(flightInfo)
+                    .then(miniOpenCabins => {
+                    if (miniOpenCabins !== null && miniOpenCabins !== undefined) {
+                        state.lowestCabin = miniOpenCabins;
+                        console.log('已更新 state.lowestCabin:', state.lowestCabin);
+                    } else {
+                        state.lowestCabin = '无';
+                        console.log('未找到最低可开舱位，已将 state.lowestCabin 设置为 "无"');
+                    }
+                })
+                    .catch(error => {
+                    state.lowestCabin = '无';
+                    window.top.message.error('获取航班最低可开舱位时发生错误');
+                });
             },
+
         };
 
         // 数据获取模块
