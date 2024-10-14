@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.10
+// @version           1.0.11
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -220,6 +220,12 @@
 - 优化功能：controller模块增加了关于iframe的判断，减少压力；
 - 优化功能：修改了elementObserver中getFlightInfo中一个条件的判断（有可能有部分航线去不到airRout）；
 
+## 版本 1.0.11
+### 2024-10-12
+- 优化功能：右上角的预案最低舱改为了"无"；
+- 新增功能：点击航班的时候，会获取这个航班的预案，并替换右上角的预案文本；
+
+
 
 */
 
@@ -328,7 +334,8 @@
                 queryButton: 'button.ant-btn.ant-btn-primary',
                 cabinControlId: '#cabin-control-id .ant-table-tbody',
                 artTable: '.art-table',
-                logoCommon: '.logo-common___1uHpY.logo-small___yPRwa'
+                logoCommon: '.logo-common___1uHpY.logo-small___yPRwa',
+                lowestCabinPlan: 'div.ant-col.ant-col-2.ant-form-item-control > div > div',
             },
 
             // DOM元素ID配置
@@ -470,6 +477,13 @@
                     defaultValue: true
                 },
                 {
+                    id: 'lowestCabin',
+                    text: '预案最低舱',
+                    hasCheckbox: true,
+                    storageKey: 'k_lowestCabin',
+                    defaultValue: true
+                },
+                {
                     id: 'checkUpdate',
                     text: '检查更新',
                     hasCheckbox: false
@@ -608,6 +622,7 @@
         let _excludeFlightInfo = null;
         let _priceList = null;
         let _currentMenuId = null;
+        let _lowestCabin = '无';
         const _requestCache = new Map();
 
         // 用于存储初始值的对象
@@ -652,6 +667,13 @@
             },
             set currentElementType(type) {
                 _currentElementType = type;
+            },
+
+            get lowestCabin() {
+                return _lowestCabin;
+            },
+            set lowestCabin(cabin) {
+                _lowestCabin = cabin;
             },
 
             get priceList() {
@@ -1735,7 +1757,7 @@
         };
     });
 
-    ModuleSystem.define('enhanceUI', ['core'], function(core) {
+    ModuleSystem.define('enhanceUI', ['core', 'config', 'state'], function(core, config, state) {
 
         if (!core.isFeatureEnabled("k_interfaceOptimization")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -1762,6 +1784,26 @@
             init: function() {
                 moveButton();
                 removeButton();
+            }
+        };
+    });
+
+    ModuleSystem.define('lowestCabin', ['core', 'config', 'state'], function(core, config, state) {
+
+        if (!core.isFeatureEnabled("k_lowestCabin")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
+
+        function changeElementText() {
+            const element = core.$(config.selectors.lowestCabinPlan);
+            if (!element) return;
+
+            element.textContent = state.lowestCabin;
+        }
+
+        return {
+            init: function() {
+                changeElementText();
             }
         };
     });
@@ -2054,7 +2096,7 @@
         };
     });
 
-    ModuleSystem.define('dataEventManager', ['core', 'state'], function(core, state) {
+    ModuleSystem.define('dataEventManager', ['core', 'state', 'elementObserver'], function(core, state, elementObserver) {
 
         if (!core.isFeatureEnabled("k_priceDisplay") && !core.isFeatureEnabled("k_syncDisplay") && !core.isFeatureEnabled("k_quickNavigation")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -2068,7 +2110,9 @@
                         mutation.addedNodes.forEach(node => {
                             if (node.nodeType === Node.ELEMENT_NODE) {
                                 if (node.id === 'refresh' || node.querySelector('#refresh')) {
+                                    //console.log('增加刷新按钮监控器');
                                     this.addEventListeners();
+                                    this.addTableEventListener();
                                 }
                             }
                         });
@@ -2096,7 +2140,14 @@
                         form.setAttribute('data-keydown-listener-added', 'true');
                     }
                 }
-            }
+            },
+
+            addTableEventListener: function() {
+                const tableElement = core.$('.art-table');
+                if (tableElement) {
+                    tableElement.addEventListener('click', eventTrigger.handleLayoutContentClick);
+                }
+            },
         };
 
         // 事件触发模块
@@ -2112,7 +2163,7 @@
                     return;
                 }
 
-                console.log(`触发了${event.type}事件`);
+                //console.log(`触发了${event.type}事件`);
                 eventTrigger.triggerDataFetch();
             },
 
@@ -2135,7 +2186,36 @@
                 if (core.isFeatureEnabled("k_loadFactorDisplay")) {
                     dataFetcher.fetchLoadFactorData();
                 }
-            }
+                if (core.isFeatureEnabled("k_lowestCabin")) {
+                    state.lowestCabin = '无';
+                }
+            },
+
+            handleLayoutContentClick: function(event) {
+                console.log('行被点击，开始获取信息');
+                // 查找被点击的 .art-table-row 元素
+                const rowElement = event.target.closest('.art-table-row');
+                if (rowElement) {
+                    const flightInfo = elementObserver.getFlightInfo(rowElement);
+                    console.log('flightInfo', flightInfo);
+                    if (flightInfo) {
+                        dataFetcher.fetchLowestCabinPlan(flightInfo)
+                            .then(miniOpenCabins => {
+                            // 更新 state.lowestCabin
+                            if (miniOpenCabins !== null && miniOpenCabins !== undefined) {
+                                state.lowestCabin = miniOpenCabins;
+                                console.log('Updated state.lowestCabin:', state.lowestCabin);
+                            } else {
+                                state.lowestCabin = '无';
+                                console.log('No miniOpenCabins found, set state.lowestCabin to "无"');
+                            }
+                        })
+                            .catch(error => {
+                            console.error('Error fetching lowest cabin plan:', error);
+                        });
+                    }
+                }
+            },
         };
 
         // 数据获取模块
@@ -2555,6 +2635,58 @@
                 sessionStorage.setItem('fltNosResults', JSON.stringify(fltNosResults));
                 console.log("已更新 sessionStorage 中的 fltNosResults:", fltNosResults);
             },
+
+            fetchLowestCabinPlan: async function(flightInfo) {
+                try {
+                    const userInfo = state.userInfo;
+                    const { token: authorizationToken, airCompony } = userInfo;
+
+                    if (!(flightInfo.flightNumber.startsWith(airCompony) || (airCompony === 'HU' && flightInfo.flightNumber.startsWith('CN')))) {
+                        console.log(`Flight ${flightInfo.flightNumber} does not belong to ${airCompony}. Skipping.`);
+                        return null;
+                    }
+
+                    const url = new URL("http://sfm.hnair.net/sfm-admin/basedata/basicdatabizreserveplan/list");
+                    url.search = new URLSearchParams({
+                        page: '1',
+                        limit: '1',
+                        fltNo: flightInfo.flightNumber.substring(2),
+                        airline: flightInfo.flightNumber.substring(0, 2),
+                        seg: flightInfo.origin+flightInfo.dest,
+                        startFltDate: flightInfo.date,
+                        endFltDate: flightInfo.date
+                    }).toString();
+
+                    const response = await fetch(url, {
+                        "headers": {
+                            "accept": "application/json, text/plain, */*",
+                            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+                            "request-starttime": Date.now().toString(),
+                            "x-authorization": authorizationToken
+                        },
+                        "referrer": "http://sfm.hnair.net/?onlyContent=1&t=0.9296418786581169",
+                        "referrerPolicy": "strict-origin-when-cross-origin",
+                        "body": null,
+                        "method": "GET",
+                        "mode": "cors",
+                        "credentials": "include"
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+
+                    const data = await response.json();
+                    console.log("data:", data);
+
+                    // 只返回 miniOpenCabins 值
+                    return data.obj.list[0]?.miniOpenCabins || null;
+                } catch (error) {
+                    console.error('Error fetching lowest cabin plan:', error);
+                    return null;
+                }
+            },
+
         };
 
         // 数据存储模块
@@ -4130,8 +4262,8 @@
         };
     });
 
-    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver'],
-                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver) {
+    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver', 'lowestCabin'],
+                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver, lowestCabin) {
 
         // 确定当前环境
         function determineEnvironment() {
@@ -4185,6 +4317,7 @@
                     switch(environment) {
                         case 'planeAdaptIframe':
                             enhanceUI.init();
+                            lowestCabin.init();
                             batchPolicy.init();
                             elementObserver.init(mutations);
                             tooltipObserver.init(mutations);
