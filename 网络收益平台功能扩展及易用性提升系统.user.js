@@ -231,6 +231,17 @@
 - 优化功能：dataEventManager中给航班面板增加了一个绑定事件的属性，避免反复添加；
 - 优化功能：handleLayoutContentClick增加一个没数据，以及 获取失败的异常；
 
+## 版本 1.0.13
+### 2024-10-30
+- 优化功能：航班左上角增加了一个P的角标，代表航班排除了。目前只有非"自动化"的航班排除才会显示。
+
+## 版本 1.0.14
+### 2024-11-01
+- 新增功能：handleFlightControlRequest中增加了lf（客座率字段）
+
+### 2024-11-20
+- 新增功能：新增了航班进度对比，颜色显示
+
 
 
 */
@@ -487,6 +498,20 @@
                     text: '预案最低舱',
                     hasCheckbox: true,
                     storageKey: 'k_lowestCabin',
+                    defaultValue: true
+                },
+                {
+                    id: 'excludeFlight',
+                    text: '排除航班显示',
+                    hasCheckbox: true,
+                    storageKey: 'k_excludeFlight',
+                    defaultValue: true
+                },
+                {
+                    id: 'flightColor',
+                    text: '航班进度颜色',
+                    hasCheckbox: true,
+                    storageKey: 'k_flightColor',
                     defaultValue: true
                 },
                 {
@@ -1661,6 +1686,68 @@
                 return false;
             }
 
+            function getColor() {
+                const loadFactorData = state.globalLoadFactorData;
+                if (!loadFactorData || !Array.isArray(loadFactorData)) {
+                    return;
+                }
+            
+                const filteredFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || 'null');
+                if (!filteredFlightList || !Array.isArray(filteredFlightList)) {
+                    return;
+                }
+            
+                // 创建一个对象来存储客座率差值
+                const loadFactorDifferences = {};
+            
+                // 创建一个 Map 来存储历史客座率
+                const historicalLoadFactorMap = new Map();
+            
+                // 首先处理历史客座率数据
+                loadFactorData.forEach(flight => {
+                    const fltNo = flight.fltNo;
+                    const fltDate = flight.fltDate;
+            
+                    if (flight.remark) {
+                        try {
+                            const remarkObj = JSON.parse(flight.remark);
+                            const historicalLoadFactor = remarkObj["去年同期客座率"];
+                            if (historicalLoadFactor !== null && fltNo && fltDate) {
+                                const key = `${fltNo}_${fltDate}`;
+                                historicalLoadFactorMap.set(key, historicalLoadFactor);
+                            }
+                        } catch (e) {
+                            console.warn(`无法解析航班 ${fltNo} 于 ${fltDate} 的 remark 字段:`, e);
+                        }
+                    }
+                });
+            
+                // 处理当前客座率并计算差值
+                filteredFlightList.forEach(flight => {
+                    const fltNo = flight.fltNo;
+                    const fltDate = flight.fltDate.split(' ')[0];
+                    const key = `${fltNo}_${fltDate}`;
+                    
+                    const historicalLoadFactor = historicalLoadFactorMap.get(key);
+                    const currentLoadFactor = flight.lf ? parseFloat(flight.lf) / 100 : null;
+            
+                    if (historicalLoadFactor !== undefined && currentLoadFactor !== null) {
+                        // 计算差值（当前客座率 - 历史客座率）
+                        const difference = (currentLoadFactor - historicalLoadFactor).toFixed(4);
+                        
+                        loadFactorDifferences[key] = {
+                            historicalLoadFactor: historicalLoadFactor,
+                            currentLoadFactor: currentLoadFactor,
+                            difference: parseFloat(difference)
+                        };
+                    }
+                });
+            
+                // 将结果存储到 state 中
+                state.loadFactorDifferences = loadFactorDifferences;
+                console.log("state.loadFactorDifferences", state.loadFactorDifferences);
+            }
+
             async function handleFlightControlRequest(xhr) {
                 console.log('拦截到航班控制列表请求');
 
@@ -1688,7 +1775,8 @@
                                     dest: flight.dest,
                                     fltDate: flight.fltDate,
                                     fltNo: flight.fltNo,
-                                    seg: flight.seg
+                                    seg: flight.seg,
+                                    lf:flight.lf,
                                 }));
 
                                 // 获取现有的累积列表
@@ -1700,6 +1788,11 @@
                                 // 存储筛选后的数据到 sessionStorage
                                 sessionStorage.setItem('filteredFlightList', JSON.stringify(accumulatedFlightList));
                                 console.log('已将筛选后的航班数据存储到 sessionStorage');
+
+                                if (core.isFeatureEnabled("k_flightColor")) {
+                                    getColor();
+                                    console.log("state.loadFactorDifferences", state.loadFactorDifferences);
+                                }
                             }
                         }
                         if (originalOnLoad) {
@@ -2188,6 +2281,10 @@
                     dataFetcher.getLeaderList();
                     dataStorage.clearFilteredFlightList();
                 }
+                if (core.isFeatureEnabled("k_excludeFlight")) {
+                    state.globalExcludeData = null;
+                    dataFetcher.getExcludeData();
+                }
                 if (core.isFeatureEnabled("k_priceDisplay")) {
                     dataFetcher.fetchPriceDifferenceData();
                     state.currentElementType = null;
@@ -2230,13 +2327,13 @@
                     return;
                 }
 
-                console.log('获取到的航班信息:', flightInfo);
+                //console.log('获取到的航班信息:', flightInfo);
 
                 dataFetcher.fetchLowestCabinPlan(flightInfo)
                     .then(miniOpenCabins => {
                     if (miniOpenCabins !== null && miniOpenCabins !== undefined) {
                         state.lowestCabin = miniOpenCabins;
-                        console.log('已更新 state.lowestCabin:', state.lowestCabin);
+                        //console.log('已更新 state.lowestCabin:', state.lowestCabin);
                     } else {
                         state.lowestCabin = '无';
                         console.log('未找到最低可开舱位，已将 state.lowestCabin 设置为 "无"');
@@ -2395,6 +2492,47 @@
                 }
             },
 
+            getExcludeData: async function() {
+                try {
+                    const userInfo = state.userInfo;
+                    const { token: authorizationToken, airCompony } = userInfo;
+                    const xsrfToken = (document.cookie.match(/XSRF-TOKEN=([^;]+)/) || [])[1] || '';
+
+                    const cityCodeText = this.getCityCodeText();
+                    if (!cityCodeText) return;
+
+                    const startFltDate = core.$('input[placeholder="开始日期"]').value;
+                    const endFltDate = core.$('input[placeholder="结束日期"]').value;
+
+                    const url = `http://sfm.hnair.net/sfm-admin/priceCheck/exclude/list?page=1&limit=50&seg=${cityCodeText}&airline=&fltStartDate=${startFltDate}&fltEndDate=${endFltDate}`;
+                    const response = await fetch(url, {
+                        "headers": {
+                            "accept": "application/json, text/plain, */*",
+                            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+                            "request-starttime": Date.now().toString(),
+                            "x-authorization": authorizationToken
+                        },
+                        "referrer": "http://sfm.hnair.net/?onlyContent=1&t=0.6563835010594157",
+                        "referrerPolicy": "strict-origin-when-cross-origin",
+                        "body": null,
+                        "method": "GET",
+                        "mode": "cors",
+                        "credentials": "include"
+                    });
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+
+                    const allData = await response.json();
+                    const excludeData = allData.obj.list
+                    state.globalExcludeData = excludeData;
+
+                    console.log('已经获取了航班排除的数据', excludeData);
+                } catch (error) {
+                    console.error('发生错误：', error);
+                }
+            },
+
             fetchAllData: async function(depCityCode, arrCityCode, startFltDate, endFltDate, airline, authorizationToken, xsrfToken) {
                 function standardizeCityCode(code) {
                     const cityMap = {
@@ -2413,7 +2551,6 @@
                 };
                 return this.fetchPaginatedData(url, headers);
             },
-
             fetchSyncDateData: async function() {
                 try {
                     const userInfo = state.userInfo;
@@ -3825,7 +3962,7 @@
 
     ModuleSystem.define('elementObserver', ['core', 'state','config', 'indicesManager'], function(core, state,config, indicesManager) {
 
-        if (!core.isFeatureEnabled("priceDisplay") && !core.isFeatureEnabled("syncDisplay") || !core.$('#refresh')) {
+        if (!core.isFeatureEnabled("k_priceDisplay") && !core.isFeatureEnabled("k_syncDisplay") || !core.$('#refresh')) {
             return { init: function() {} };
         }
 
@@ -3901,6 +4038,144 @@
             });
 
 
+        }
+
+        function showExcludeFlight(tableContainer) {
+            const tableCells = tableContainer.querySelectorAll('.art-table-cell');
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // 仅比较日期部分
+
+            const flightList = state.globalExcludeData;
+            if (!flightList) return; // 确保 flightList 存在
+
+            // 预先过滤出所有匹配的航班
+            const matchingFlights = flightList.filter(flight => {
+                return !flight.module.includes('自动化');
+            });
+
+            // 遍历 tableCells
+            tableCells.forEach(cell => {
+                const span = cell.querySelector("span[id^='data-']");
+                const userInfo = state.userInfo;
+                const { airCompony } = userInfo;
+
+                if (cell.querySelector('.added-p-container') || cell.querySelector('.checked-p-container')) return;
+
+                if (span && span.textContent.includes(airCompony)) {
+                    // 解析 span.id，例如 'data-2024-10-27-GS7917'
+                    cell.classList.add('checked-p-container'); // 添加类名以便后续检查
+
+                    const idParts = span.id.split('-');
+                    if (idParts.length >= 5) {
+                        const fltDate = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
+                        const fltNo = idParts[4];
+
+                        const flightDate = new Date(fltDate);
+                        flightDate.setHours(0, 0, 0, 0);
+
+                        // 计算日期差值（天数）
+                        const timeDiff = flightDate.getTime() - today.getTime();
+                        const dayDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+
+                        // 遍历已经匹配的航班
+                        const applicableFlights = matchingFlights.filter(flight => {
+                            const isDateInRange = flightDate >= (new Date(flight.fltStartDate)).setHours(0, 0, 0, 0) && flightDate <= (new Date(flight.fltEndDate)).setHours(0, 0, 0, 0);
+                            const isDayDiffInRange = dayDiff >= flight.startDcp && dayDiff <= flight.endDcp;
+                            const isFltNoMatch = flight.fltNo === null || flight.fltNo === fltNo;
+
+                            return isDateInRange && isDayDiffInRange && isFltNoMatch;
+                        });
+
+                        if (applicableFlights.length > 0) {
+                            //console.log(`找到 ${applicableFlights.length} 个匹配的航班项：`, applicableFlights);
+
+                            for (const flight of applicableFlights) {
+                                const newDiv = cell.querySelector('div');
+                                cell.classList.add('added-p-container'); // 添加类名以便后续检查
+
+                                if (!newDiv.querySelector('.added-p')) {
+                                    const newSpan = document.createElement('span');
+                                    newSpan.style.width = '13px';
+                                    newSpan.style.height = '18px';
+                                    newSpan.style.background = 'url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmVyc2lvbj0iMS4xIj4KCiA8Zz4KICA8dGl0bGU+YmFja2dyb3VuZDwvdGl0bGU+CiAgPHJlY3QgZmlsbD0ibm9uZSIgaWQ9ImNhbnZhc19iYWNrZ3JvdW5kIiBoZWlnaHQ9IjgxNiIgd2lkdGg9IjE2MTMiIHk9Ii0xIiB4PSItMSIvPgogPC9nPgogPGc+CiAgPHRpdGxlPkxheWVyIDE8L3RpdGxlPgogIDxnIGlkPSJzdmdfMSIgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwtNSwtMjc0KSAiPgogICA8cGF0aCBpZD0ic3ZnXzIiIGZpbGw9IiM1OEFDRkEiIGZpbGwtcnVsZT0ibm9uemVybyIgZD0ibTIzLDI3NS40MDIxN2MtMC4wMDA3NywtMC43NTAwMyAtMC41NTk5NywtMS4zNTc4NSAtMS4yNSwtMS40MDIxN2wtMTUuNSwwYy0wLjY5MDAzLDAuMDQ0MzIgLTEuMjQ5MjMsMC42NTIxNCAtMS4yNSwxLjQwMjE3bDAsMjIuMDEwODdjMC4wMDAwNCwwLjMwMDEzIDAuMjIzODksMC41NDM0IDAuNSwwLjU0MzRjMC4wODkxMiwwIDAuMTc2NjIsLTAuMDI1ODkgMC4yNTM0NCwtMC4wNzQ5OWw4LjI0NjU2LC01LjI3MjU4bDguMjQ2NTYsNS4yNzI1OGMwLjA3NjgyLDAuMDQ5MSAwLjE2NDMyLDAuMDc0OTkgMC4yNTM0NCwwLjA3NDk5YzAuMjc2MTEsMCAwLjQ5OTk2LC0wLjI0MzI3IDAuNSwtMC41NDM0bDAsLTIyLjAxMDg3eiIvPgogIDwvZz4KICA8dGV4dCBmb250LXdlaWdodD0ibm9ybWFsIiBmb250LXN0eWxlPSJub3JtYWwiIHN0cm9rZT0iIzAwMCIgdHJhbnNmb3JtPSJtYXRyaXgoMS4xMTMxMjM1NTg3NzAxNjk2LDAsMCwxLjIsLTAuOTY3MDI0NzQ3NjQ0ODk4OCwwKSAiIHhtbDpzcGFjZT0icHJlc2VydmUiIHRleHQtYW5jaG9yPSJzdGFydCIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGlkPSJzdmdfMyIgeT0iMTEuNTUiIHg9IjMuNTUiIHN0cm9rZS13aWR0aD0iMCIgZmlsbD0iI2ZmZmZmZiI+UDwvdGV4dD4KIDwvZz4KPC9zdmc+Cg==") center center / 80% no-repeat';
+                                    newSpan.style.cursor = 'pointer';
+                                    newSpan.style.display = 'inline-block';
+                                    newSpan.classList.add('added-p'); // 添加类名以便后续检查
+
+                                    // 将 <span> 添加到 <div>
+                                    newDiv.appendChild(newSpan);
+
+                                    //console.log('已添加 "P" 图标到:', cell);
+                                    break; // 找到后退出循环
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function showColor(tableContainer) {
+            const tableCells = tableContainer.querySelectorAll('.art-table-cell');
+            const loadFactorDifferences = state.loadFactorDifferences;
+            if (!loadFactorDifferences) return;
+        
+            // 遍历 tableCells
+            tableCells.forEach(cell => {
+                const span = cell.querySelector("span[id^='data-']");
+                if (!span) return;
+
+                if (cell.querySelector('.added-color')) return;
+        
+                // 解析 span.id，例如 'data-2024-10-27-GS7917'
+                const idParts = span.id.split('-');
+                if (idParts.length >= 5) {
+                    const fltDate = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
+                    const fltNo = idParts[4];
+                    const key = `${fltNo}_${fltDate}`;
+        
+                    // 获取该航班的客座率差异数据
+                    const loadFactorInfo = loadFactorDifferences[key];
+                    if (loadFactorInfo) {
+                        // 获取差异百分比
+                        const difference = loadFactorInfo.difference;
+                        
+                        // 设置颜色
+                        const color = getColorByDifference(difference);
+                        
+                        cell.style.backgroundColor = color;
+                        cell.style.borderTop = '1px solid #f0f0f0';
+
+                        cell.classList.add('added-color'); // 添加类名以便后续检查
+                    }
+                }
+            });
+        }
+        
+        // 根据差异值返回对应的颜色
+        function getColorByDifference(difference) {
+            // 将差异值转换为百分比
+            const percentage = Math.abs(difference * 100); // 使用绝对值
+            
+            if (percentage <= 5) {
+                return 'rgba(149, 221, 100, 0.3)'; // 浅绿色，低透明度
+            } else if (percentage >= 30) {
+                return 'rgba(255, 99, 71, 0.8)'; // 深红色，高透明度
+            } else {
+                // 在5%到30%之间进行颜色渐变
+                // 计算渐变进度 (0-1之间的值)
+                const progress = (percentage - 5) / (30 - 5);
+                
+                // 颜色渐变：从浅绿色(149, 221, 100)渐变到深红色(255, 99, 71)
+                const r = Math.round(149 + (255 - 149) * progress);
+                const g = Math.round(221 + (99 - 221) * progress);
+                const b = Math.round(100 + (71 - 100) * progress);
+                
+                // 透明度也随着差异增大而增加（0.3到0.8）
+                const alpha = 0.3 + (0.8 - 0.3) * progress;
+                
+                return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            }
         }
 
         function getElementType(cell, row) {
@@ -4032,6 +4307,16 @@
                 const tableContainer = core.$('.art-table');
                 if (tableContainer) {
                     setupEventListeners(tableContainer);
+                    if (core.isFeatureEnabled("k_excludeFlight")) {
+                        showExcludeFlight(tableContainer);
+                    }
+                    if (core.isFeatureEnabled("k_flightColor")) {
+                        showColor(tableContainer); // 添加这一行
+                    }
+
+                    // 调用新增的遍历函数
+                    //showExcludeFlight(tableContainer);
+                    //core.debounce(showExcludeFlight, 500);
                 }
             },
             getFlightInfo: getFlightInfo,
@@ -4040,7 +4325,7 @@
 
     ModuleSystem.define('tooltipObserver', ['core', 'state', 'config'], function(core, state, config) {
 
-        if (!core.isFeatureEnabled("priceDisplay") && !core.isFeatureEnabled("syncDisplay")) {
+        if (!core.isFeatureEnabled("k_priceDisplay") && !core.isFeatureEnabled("k_syncDisplay")) {
             return { init: function() {} }; // 返回空的初始化函数
         }
 
@@ -4164,7 +4449,7 @@
                 return isWithinDate && isWithinDcp && isWithinDow && matchesFltNo && matchesCabinType;
             });
 
-            console.log("满足条件的价差列表:", applicableEntries);
+            //console.log("满足条件的价差列表:", applicableEntries);
 
             // Step 2: Map applicableEntries to flight numbers and price diffs, considering cabin type
             applicableEntries.forEach(entry => {
@@ -4172,8 +4457,8 @@
                     entry.compFltNo.split(',').forEach(fltNo => {
                         const flight = flightData.find(f => f.flightNumber === fltNo && f.date.getTime() === targetDate.getTime());
                         if (flight) {
-                            console.log(`Searching for flight ${fltNo} on ${targetDate}:`, flight);
-                            console.log(`中间计算过程${fltNo}的价差: ${entry.priceDiffStd}`);
+                            //console.log(`Searching for flight ${fltNo} on ${targetDate}:`, flight);
+                            //console.log(`中间计算过程${fltNo}的价差: ${entry.priceDiffStd}`);
                             let calculatedPrice;
                             if (cabinType === '经济舱' && flight.economicPrice) {
                                 calculatedPrice = flight.economicPrice + entry.priceDiffStd;
@@ -4182,19 +4467,19 @@
                             }
                             if (calculatedPrice) {
                                 lowestPrices.push(calculatedPrice);
-                                console.log(`Calculated price for flight ${fltNo}: ${calculatedPrice}`);
+                                //console.log(`Calculated price for flight ${fltNo}: ${calculatedPrice}`);
                             }
                         }
                     });
                 }
             });
 
-            console.log("经过计算后的最低价格:", lowestPrices);
+            //console.log("经过计算后的最低价格:", lowestPrices);
 
             // Step 3: Find the minimum price from the list of calculated lowest prices
             if (lowestPrices.length > 0) {
                 const overallLowestPrice = Math.min(...lowestPrices);
-                console.log("Overall Lowest Price:", overallLowestPrice);
+                //console.log("Overall Lowest Price:", overallLowestPrice);
                 return overallLowestPrice;
             } else {
                 console.log("No applicable prices found");
