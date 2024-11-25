@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.14
+// @version           1.0.15
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -43,7 +43,7 @@
 - 优化功能：优化了enhanceBatchProcessing的逻辑，绑定舱位元素双击事件的时候，要先看一下第7个元素有没有checkbox，有的才绑定。
 
 ### 2024-08-02
-- 优化功能：优化了enhanceBatchProcessing的逻辑，将原本右侧面板的绑定事件，改到了元素身上，解决了点击“发送指令”后绑定失败的问题。
+- 优化功能：优化了enhanceBatchProcessing的��辑，将原本右侧面板的绑定事件，改到了元素身上，解决了点击"发送指令"后绑定失败的问题。
 
 ## 版本 0.1.7
 ### 2024-08-02
@@ -51,7 +51,7 @@
 
 ## 版本 0.1.8
 ### 2024-08-02
-- 优化功能：优化了“关于”菜单的显示内容。
+- 优化功能：优化了"关于"菜单的显示内容。
 
 ## 版本 0.1.9
 ### 2024-08-08
@@ -128,7 +128,7 @@
 - 新增功能：新增了航班调整页面左侧面板的右击下拉菜单，同时统一了右侧RO面板的下拉菜单，使用统一的函数来作用；
 - 新增功能：新增了系统级的antDesignOperations，用来操作页面控件的输入，暂时包括日期、下拉单选菜单、input以及fillTextArea；
 - 新增功能：新增了快捷航班排除功能，可以将航班信息带入到航班排除页面；
-- 优化功能：将右击下拉菜单的功能从“页面优化”大功能拆出来；
+- 优化功能：将右击下拉菜单的功能从"页面优化"大功能拆出来；
 
 ## 版本 0.1.24
 ### 2024-09-14
@@ -180,7 +180,7 @@
 
 ## 版本 1.0.4
 ### 2024-09-30
-- 优化功能：优化batchPolicy中的addNextStepButtonListener功能，现在点击“下一步”只删除页面表格中有的数据；
+- 优化功能：优化batchPolicy中的addNextStepButtonListener功能，现在点击"下一步"只删除页面表格中有的数据；
 
 ## 版本 1.0.5
 ### 2024-09-30
@@ -241,6 +241,10 @@
 
 ### 2024-11-20
 - 新增功能：新增了航班进度对比，颜色显示
+
+## 版本 1.0.15
+### 2024-11-25
+- 优化功能：优化了state中全局变量的定义
 
 
 
@@ -649,12 +653,18 @@
         let _cachedUserInfo = null;
         let _globalIndices = null;
         let _currentElementType = null;
-        let _currentFlightInfo = null;
         let _excludeFlightInfo = null;
         let _priceList = null;
         let _currentMenuId = null;
         let _lowestCabin = '无';
         const _requestCache = new Map();
+
+        // 全局数据相关的私有变量
+        let _globalFetchedData = null;
+        let _globalAdditionalData = null;
+        let _globalLoadFactorData = null;
+        let _globalExcludeData = null;
+        let _loadFactorDifferences = null;
 
         // 用于存储初始值的对象
         let _initialValues = {
@@ -754,21 +764,73 @@
                 _initialValues = {..._initialValues, ...values};
             },
 
+            // 新增全局数据相关的 getter/setter
+            get globalFetchedData() {
+                return _globalFetchedData;
+            },
+            set globalFetchedData(data) {
+                _globalFetchedData = data;
+            },
+
+            get globalAdditionalData() {
+                return _globalAdditionalData;
+            },
+            set globalAdditionalData(data) {
+                _globalAdditionalData = data;
+            },
+
+            get globalLoadFactorData() {
+                return _globalLoadFactorData;
+            },
+            set globalLoadFactorData(data) {
+                _globalLoadFactorData = data;
+            },
+
+            get globalExcludeData() {
+                return _globalExcludeData;
+            },
+            set globalExcludeData(data) {
+                _globalExcludeData = data;
+            },
+
+            get loadFactorDifferences() {
+                return _loadFactorDifferences;
+            },
+            set loadFactorDifferences(data) {
+                _loadFactorDifferences = data;
+            },
+
             // 重置所有状态
             resetAll: function() {
                 _cachedUserInfo = null;
                 _globalIndices = null;
-                _currentFlightInfo = null;
                 _currentElementType = null;
                 _priceList = null;
                 _currentMenuId = null;
                 _requestCache.clear();
+                
+                // 重置全局数据
+                _globalFetchedData = null;
+                _globalAdditionalData = null;
+                _globalLoadFactorData = null;
+                _globalExcludeData = null;
+                _loadFactorDifferences = null;
+                
                 _initialValues = {
                     firstCell: '',
                     secondCell: '',
                     tabPane: ''
                 };
             },
+
+            // 可选：添加一个方法来重置特定类型的数据
+            resetGlobalData: function() {
+                _globalFetchedData = null;
+                _globalAdditionalData = null;
+                _globalLoadFactorData = null;
+                _globalExcludeData = null;
+                _loadFactorDifferences = null;
+            }
         };
 
         return state;
@@ -2288,7 +2350,7 @@
                 if (core.isFeatureEnabled("k_priceDisplay")) {
                     dataFetcher.fetchPriceDifferenceData();
                     state.currentElementType = null;
-                    state.PriceList = null;
+                    state.priceList = null;
                     state.currentFlightInfo = null;
 
                 }
@@ -2300,6 +2362,9 @@
                 }
                 if (core.isFeatureEnabled("k_lowestCabin")) {
                     state.lowestCabin = '无';
+                }
+                if (core.isFeatureEnabled("k_flightColor")) {
+                    state.loadFactorDifferences = null;
                 }
             },
 
@@ -3281,7 +3346,7 @@
 
             const content = `
         <div>
-            <p>下面表格为批量填报政策过程中出问题的项目，点击“取消”会保留，建议删除并重新呈报。</p>
+            <p>下面表格为批量填报政策过程中出问题的项目，点击"取消"会保留，建议删除并重新呈报。</p>
         </div>
     `;
 
@@ -3980,7 +4045,7 @@
             requestAnimationFrame(() => {
                 // 重置状态
                 state.currentElementType = null;
-                state.PriceList = null;
+                state.priceList = null;
                 state.currentFlightInfo = null;
 
                 const targetCell = event.target.closest('.art-table-cell');
@@ -4024,10 +4089,10 @@
                      elementType === config.ELEMENT_TYPES.BUSINESS_PRICE) &&
                     (flightInfo.flightNumber.includes(airCompony) || flightInfo.flightNumber.includes('CN'))) {
                     try {
-                        state.PriceList = getPricesList(targetCell, state.currentElementType);
+                        state.priceList = getPricesList(targetCell, state.currentElementType);
                     } catch (error) {
                         console.warn('Error in getting price list:', error);
-                        state.PriceList = null; // 如果获取价格列表失败，设置为 null
+                        state.priceList = null; // 如果获取价格列表失败，设置为 null
                     }
                 }
 
@@ -4510,22 +4575,22 @@
             const elementType = state.currentElementType;
 
             if (targetAirCompany === airCompony || (airCompony === "HU" && targetAirCompany === "CN")) {
-                if (fetchedData && state.PriceList) {
+                if (fetchedData && state.priceList) {
                     if (elementType === config.ELEMENT_TYPES.ECONOMIC_PRICE) {
                         content += "<div>经济舱最低价格：</div>";
                         const cabinType = '经济舱';
-                        let price = getLowestPrice(cabinType, fetchedData, state.PriceList, targetDate, today);
+                        let price = getLowestPrice(cabinType, fetchedData, state.priceList, targetDate, today);
                         content += `<div>${price !== null ? price : '未设置一线一策'}</div>`;
                         tooltipElement.innerHTML = content;
                     } else if (elementType === config.ELEMENT_TYPES.BUSINESS_PRICE) {
                         content += "<div>公务舱最低价格：</div>";
                         const cabinType = '公务舱';
-                        let price = getLowestPrice(cabinType, fetchedData, state.PriceList, targetDate, today);
+                        let price = getLowestPrice(cabinType, fetchedData, state.priceList, targetDate, today);
                         content += `<div>${price !== null ? price : '未设置一线一策'}</div>`;
                         tooltipElement.innerHTML = content;
                     }
                 }
-                if (additionalData && !state.PriceList) {
+                if (additionalData && !state.priceList) {
                     if (elementType === config.ELEMENT_TYPES.DATE_FLIGHT) {
                         content += processSyncDatePriceData(additionalData, targetFlight, targetDate);
                         tooltipElement.innerHTML += content;
