@@ -252,7 +252,7 @@
 
 ### 2024-12-04
 - 优化功能：对config中url部分的硬编码做了替换。
-
+- 优化功能：对config中selectors部分的硬编码做了替换。
 
 
 */
@@ -366,7 +366,6 @@
                 fltNosInput: '#fltNos .ant-select-selection-search-input',
                 queryButton: 'button.ant-btn.ant-btn-primary',
                 cabinControlId: '#cabin-control-id .ant-table-tbody',
-                artTable: '.art-table',
                 logoCommon: '.logo-common___1uHpY.logo-small___yPRwa',
                 lowestCabinPlan: 'div.ant-col.ant-col-2.ant-form-item-control > div > div',
             },
@@ -938,7 +937,7 @@
 
     ModuleSystem.define('menuManager', ['core', 'state', 'config'], function(core, state, config) {
         // 私有变量和函数
-        const symbol_selector = ".logo-common___1uHpY.logo-small___yPRwa";
+        const symbol_selector = config.selectors.logoCommon;
 
         // 菜单创建和管理
         function createMenu() {
@@ -1940,7 +1939,7 @@
         };
     });
 
-    ModuleSystem.define('enhanceUIWithContextMenu', ['core', 'state', 'indicesManager'], function(core, state, indicesManager) {
+    ModuleSystem.define('enhanceUIWithContextMenu', ['core', 'state', 'indicesManager', 'config'], function(core, state, indicesManager, config) {
 
         if (!core.isFeatureEnabled("k_interfaceOptimization")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -2044,7 +2043,7 @@
         function addRightMenuItems(menu) {
             const sendItem = createMenuItem('发送指令');
             sendItem.addEventListener('click', () => {
-                const button = Array.from(core.$$('button.ant-btn.ant-btn-primary')).find(btn => btn.textContent.includes('发送指令'));
+                const button = Array.from(core.$$(config.selectors.queryButton)).find(btn => btn.textContent.includes('发送指令'));  
                 if (button) {
                     button.click();
                 }
@@ -2053,7 +2052,7 @@
 
             const priceAdjustmentItem = createMenuItem('发起调价');
             priceAdjustmentItem.addEventListener('click', () => {
-                const button = Array.from(core.$$('button.ant-btn.ant-btn-primary')).find(btn => btn.textContent.includes('发起调价'));
+                const button = Array.from(core.$$(config.selectors.queryButton)).find(btn => btn.textContent.includes('发起调价'));
                 if (button) {
                     button.click();
                 }
@@ -2497,8 +2496,8 @@
                     const depCityCode = cityCodeText.substring(0, 3).toUpperCase();
                     const arrCityCode = cityCodeText.substring(3, 6).toUpperCase();
 
-                    const startFltDate = core.$('input[placeholder="开始日期"]').value;
-                    const endFltDate = core.$('input[placeholder="结束日期"]').value;
+                    const startFltDate = core.$(config.selectors.dateInputStart).value;
+                    const endFltDate = core.$(config.selectors.dateInputEnd).value;
 
                     let allData = [];
 
@@ -2530,8 +2529,8 @@
                     const cityCodeText = this.getCityCodeText();
                     if (!cityCodeText) return;
 
-                    const startFltDate = core.$('input[placeholder="开始日期"]').value;
-                    const endFltDate = core.$('input[placeholder="结束日期"]').value;
+                    const startFltDate = core.$(config.selectors.dateInputStart).value;
+                    const endFltDate = core.$(config.selectors.dateInputEnd).value;
 
                     const url = `${config.urls.excludeList}?page=1&limit=50&seg=${cityCodeText}&airline=&fltStartDate=${startFltDate}&fltEndDate=${endFltDate}`;
                     const response = await fetch(url, {
@@ -2564,9 +2563,7 @@
 
             fetchAllData: async function(depCityCode, arrCityCode, startFltDate, endFltDate, airline, authorizationToken, xsrfToken) {
                 function standardizeCityCode(code) {
-                    const cityMap = {
-                        'PEK': 'BJS', 'PKX': 'BJS', 'TFU': 'CTU', 'XIY': 'SIA', 'PVG':'SHA'
-                    };
+                    const cityMap = config.misc.cityCodeMap
                     return cityMap[code.toUpperCase()] || code.toUpperCase();
                 }
 
@@ -2592,8 +2589,8 @@
                     const depCityCode = cityCodeText.substring(0, 3).toUpperCase();
                     const arrCityCode = cityCodeText.substring(3, 6).toUpperCase();
 
-                    const startFltDate = core.$('input[placeholder="开始日期"]').value;
-                    const endFltDate = core.$('input[placeholder="结束日期"]').value;
+                    const startFltDate = core.$(config.selectors.dateInputStart).value;
+                    const endFltDate = core.$(config.selectors.dateInputEnd).value;
 
                     const params = this.constructHistoricalDataParams('job_18992');
 
@@ -2623,8 +2620,8 @@
                     const depCityCode = cityCodeText.substring(0, 3).toUpperCase();
                     const arrCityCode = cityCodeText.substring(3, 6).toUpperCase();
 
-                    const startFltDate = core.$('input[placeholder="开始日期"]').value;
-                    const endFltDate = core.$('input[placeholder="结束日期"]').value;
+                    const startFltDate = core.$(config.selectors.dateInputStart).value;
+                    const endFltDate = core.$(config.selectors.dateInputEnd).value;
 
                     const params = this.constructCurrentDayDataParams('job_12815');
 
@@ -2922,7 +2919,7 @@
         };
     });
 
-    ModuleSystem.define('excludeFlight', ['core', 'state', 'uiOperations'], function(core, state, uiOperations) {
+    ModuleSystem.define('excludeFlight', ['core', 'state', 'uiOperations', 'config'], function(core, state, uiOperations, config) {
         let isFillingForm = false;
 
         if (!core.isFeatureEnabled("k_quickNavigation")) {
@@ -2936,7 +2933,7 @@
                 return;
             }
 
-            const reportNewButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
+            const reportNewButton = Array.from(document.querySelectorAll(config.selectors.queryButton))
             .find(btn => btn.textContent.includes('呈报新排除航班'));
 
             const excludeFlightInfo = JSON.parse(sessionStorage.getItem('excludeFlightInfo') || 'null');
@@ -2957,7 +2954,7 @@
                 await autoFillBasic();
 
                 await core.delay(200);
-                const addNewButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
+                const addNewButton = Array.from(core.$$(config.selectors.queryButton))
                 .find(btn => btn.textContent.includes('添加'));
                 if (addNewButton) addNewButton.click();
 
@@ -2965,7 +2962,7 @@
                 await autoFillForms();
 
                 await core.delay(100);
-                const confirmButton = Array.from(document.querySelectorAll('button.ant-btn.ant-btn-primary'))
+                const confirmButton = Array.from(core.$$(config.selectors.queryButton))
                 .find(btn => btn.textContent.includes('确'));
                 if (confirmButton) confirmButton.click();
 
@@ -3037,7 +3034,7 @@
                 const dcp = calculateDCP(excludeFlightInfo.date);
                 await uiOperations.fillInput('#endDcp', dcp.toString());
                 await uiOperations.selectDropdownOption('#approveLead', leaderData[0]);
-                const reason = "为了确保航班正常销售，特此申请暂时剔除自动化调整规则，以便根据实时市场情况灵活调整。";
+                const reason = config.misc.defaultReason;
                 await uiOperations.fillTextArea('#reason', reason);
             } catch (error) {
                 console.error('自动填充表单失败:', error);
@@ -3367,7 +3364,7 @@
                 }
 
                 // 3. 点击整个面板中的删除按钮
-                const deleteButtons = tableBody.closest('.ant-modal-content').querySelectorAll('button.ant-btn.ant-btn-primary');
+                const deleteButtons = tableBody.closest('.ant-modal-content').querySelectorAll(config.selectors.queryButton);
                 const deleteButton = Array.from(deleteButtons).find(button => button.textContent.includes('删'));
                 if (deleteButton) {
                     deleteButton.click();
@@ -3501,7 +3498,7 @@
                 return;
             }
 
-            const nextStepButton = Array.from(modalContent.querySelectorAll('button.ant-btn.ant-btn-primary'))
+            const nextStepButton = Array.from(modalContent.querySelectorAll(config.selectors.queryButton))
             .find(button => button.textContent.trim() === '下一步');
 
             if (nextStepButton) {
@@ -3793,11 +3790,11 @@
         }
 
         async function updateSegInput() {
-            const segInput = core.$("input#seg[placeholder='请填写']");
+            const segInput = core.$(config.selectors.segInput);
             if (!segInput) return;
 
-            await uiOperations.fillInput("input#seg[placeholder='请填写']", "");
-            await uiOperations.fillInput("input#seg[placeholder='请填写']", "ALLSEG");
+            await uiOperations.fillInput(config.selectors.segInput, ""); 
+            await uiOperations.fillInput(config.selectors.segInput, "ALLSEG");
         }
 
         async function updateFltNosInput() {
@@ -3831,7 +3828,7 @@
         }
 
         function clickQueryButton() {
-            const queryButton = Array.from(core.$$("button.ant-btn.ant-btn-primary"))
+            const queryButton = Array.from(core.$$(config.selectors.queryButton))
             .find(button => button.textContent.includes("查询"));
 
             if (queryButton) {
@@ -3923,8 +3920,8 @@
         }
 
         function filterTableRows() {
-            const startDate = core.$(`input[placeholder="开始日期"]`).value;
-            const endDate = core.$(`input[placeholder="结束日期"]`).value;
+            const startDate = core.$(config.selectors.dateInputStart).value;
+            const endDate = core.$(config.selectors.dateInputEnd).value;
             const segmentValue = core.$(`input#seg`).value;
             const segmentsInfo = getSegmentsInfo();
             console.log("segmentsInfo:", segmentsInfo);
