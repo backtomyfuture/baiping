@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.15
+// @version           1.0.16
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -43,7 +43,7 @@
 - 优化功能：优化了enhanceBatchProcessing的逻辑，绑定舱位元素双击事件的时候，要先看一下第7个元素有没有checkbox，有的才绑定。
 
 ### 2024-08-02
-- 优化功能：优化了enhanceBatchProcessing的��辑，将原本右侧面板的绑定事件，改到了元素身上，解决了点击"发送指令"后绑定失败的问题。
+- 优化功能：优化了enhanceBatchProcessing的逻辑，将原本右侧面板的绑定事件，改到了元素身上，解决了点击"发送指令"后绑定失败的问题。
 
 ## 版本 0.1.7
 ### 2024-08-02
@@ -250,6 +250,9 @@
 ### 2024-11-25
 - 优化功能：代码加密
 
+### 2024-12-04
+- 优化功能：对config中url部分的硬编码做了替换。
+
 
 
 */
@@ -341,12 +344,17 @@
             urls: {
                 modelList: 'http://sfm.hnair.net/sfm-admin/priceCheck/exclude/modelList',
                 leaderList: 'http://sfm.hnair.net/sfm-admin/priceCheck/exclude/leaderList',
-                currentList: 'http://sfm.hnair.net/sfm-admin/sys/sysfltseguser/listCurrent',
+                excludeList: 'http://sfm.hnair.net/sfm-admin/priceCheck/exclude/list',
+                ruleList: 'http://sfm.hnair.net/sfm-admin/priceCheck/rule/list',
+                autoimlogList: 'http://sfm.hnair.net/sfm-admin/im/autoimlog/list',
+                sysUserList: 'http://sfm.hnair.net/sfm-admin/sys/sysfltseguser/listCurrent',
                 longCmdFltno: 'http://sfm.hnair.net/sfm-admin/rtquery/longcmd/fltno',
                 longCmdQuery: 'http://sfm.hnair.net/sfm-admin/rtquery/longcmd/query',
+                islongCmdQuery: 'sfm-admin/rtquery/longcmd/query',
+                isflightControlList:'sfm-admin/fltmanage/flightcontrol/list',
                 flightControlList: 'http://sfm.hnair.net/sfm-admin/fltmanage/flightcontrol/list',
-                priceCheckRuleList: 'http://sfm.hnair.net/sfm-admin/priceCheck/rule/list',
-                autoImLogList: 'http://sfm.hnair.net/sfm-admin/im/autoimlog/list'
+                reservePlanList: 'http://sfm.hnair.net/sfm-admin/basedata/basicdatabizreserveplan/list',
+                referrer: `http://sfm.hnair.net/?onlyContent=1&t=${Math.random()}`
             },
 
             // 选择器配置
@@ -361,37 +369,6 @@
                 artTable: '.art-table',
                 logoCommon: '.logo-common___1uHpY.logo-small___yPRwa',
                 lowestCabinPlan: 'div.ant-col.ant-col-2.ant-form-item-control > div > div',
-            },
-
-            // DOM元素ID配置
-            elementIds: {
-                kcg: 'kcg',
-                selectUser: 'select_user',
-                selectContainer: 'select_container',
-                batchQueryButton: 'batchQueryButton',
-                basicApplyReason: 'basic_applyReason',
-                basicFlowInstanceName: 'basic_flowInstanceName',
-                basicRemark: 'basic_remark',
-                fltDate: 'fltDate',
-                route: 'route',
-                airline: 'airline',
-                module: 'module',
-                jobName: 'jobName',
-                seg: 'seg',
-                applicableCabin: 'applicableCabin',
-                fltNo: 'fltNo',
-                startDcp: 'startDcp',
-                endDcp: 'endDcp',
-                approveLead: 'approveLead',
-                reason: 'reason'
-            },
-
-            // 类名配置
-            classNames: {
-                kmenu: 'kmenu',
-                checkbutton: 'checkbutton',
-                checked: 'checked',
-                batchAddButton: 'batch-add-button'
             },
 
             ELEMENT_TYPES: {
@@ -534,20 +511,6 @@
                 }
             ],
 
-            // 存储键配置
-            storageKeys: {
-                userInfo: 'userInfo',
-                menuData: 'menuData',
-                leaderData: 'leaderData',
-                fltNosData: 'fltNosData',
-                fltNosResults: 'fltNosResults',
-                filteredFlightList: 'filteredFlightList',
-                currentFlightInfo: 'currentFlightInfo',
-                currentModule: 'currentModule',
-                currentJob: 'currentJob',
-                cabinPricePolicyStorage: 'cabinPricePolicyStorage'
-            },
-
             // 默认值配置
             defaults: {
                 interval: 50,
@@ -564,16 +527,6 @@
                     beforeConfirm: 200,
                     finalConfirm: 100
                 }
-            },
-
-            // 自定义事件名称
-            customEvents: {
-                input: 'input',
-                change: 'change',
-                click: 'click',
-                mouseenter: 'mouseenter',
-                mouseover: 'mouseover',
-                mousemove: 'mousemove'
             },
 
             // 其他配置
@@ -1569,20 +1522,27 @@
     });
 
     ModuleSystem.define('apiHookManager', ['core', 'state', 'config'], function(core, state, config) {
-
         function HookXMLHttpRequest() {
-
             function shouldInterceptLongInstructionRequest(url, method) {
-                return url && typeof url === 'string' && url.includes('sfm-admin/rtquery/longcmd/query') && method === 'POST' && core.isFeatureEnabled("k_batchavjlong");
+                // 使用 config.urls 中的配置
+                return url && typeof url === 'string' && 
+                       url.includes(config.urls.islongCmdQuery) && 
+                       method === 'POST' && 
+                       core.isFeatureEnabled("k_batchavjlong");
             }
 
             function shouldInterceptFlightControlRequest(url, method) {
-                return url && typeof url === 'string' && url.includes('sfm-admin/fltmanage/flightcontrol/list') && method === 'GET' && core.isFeatureEnabled("k_quickNavigation");
+                // 使用 config.urls 中的配置
+                return url && typeof url === 'string' && 
+                       url.includes(config.urls.isflightControlList) && 
+                       method === 'GET' && 
+                       core.isFeatureEnabled("k_quickNavigation");
             }
 
             async function makeCustomFetch(details) {
                 const userInfo = state.userInfo;
-                const response = await fetch("http://sfm.hnair.net/sfm-admin/rtquery/longcmd/query", {
+                // 使用 config.urls 中的配置
+                const response = await fetch(config.urls.longCmdQuery, {
                     "headers": {
                         "accept": "application/json, text/plain, */*",
                         "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
@@ -2268,7 +2228,7 @@
         };
     });
 
-    ModuleSystem.define('dataEventManager', ['core', 'state', 'elementObserver'], function(core, state, elementObserver) {
+    ModuleSystem.define('dataEventManager', ['core', 'state', 'elementObserver', 'config'], function(core, state, elementObserver, config) {
 
         if (!core.isFeatureEnabled("k_priceDisplay") && !core.isFeatureEnabled("k_syncDisplay") && !core.isFeatureEnabled("k_quickNavigation")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -2423,14 +2383,14 @@
                     const userInfo = state.userInfo;
                     const { token: authorizationToken } = userInfo;
 
-                    const response = await fetch("http://sfm.hnair.net/sfm-admin/priceCheck/exclude/modelList", {
+                    const response = await fetch(config.urls.modelList, {
                         "headers": {
                             "accept": "application/json, text/plain, */*",
                             "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
                             "request-starttime": Date.now().toString(),
                             "x-authorization": authorizationToken
                         },
-                        "referrer": "http://sfm.hnair.net/?onlyContent=1&t=0.8830882693673767",
+                        "referrer": config.urls.referrer,
                         "referrerPolicy": "strict-origin-when-cross-origin",
                         "body": null,
                         "method": "GET",
@@ -2454,14 +2414,14 @@
                     const userInfo = state.userInfo;
                     const { token: authorizationToken } = userInfo;
 
-                    const response = await fetch("http://sfm.hnair.net/sfm-admin/priceCheck/exclude/leaderList", {
+                    const response = await fetch(config.urls.leaderList, {
                         "headers": {
                             "accept": "application/json, text/plain, */*",
                             "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
                             "request-starttime": Date.now().toString(),
                             "x-authorization": authorizationToken
                         },
-                        "referrer": "http://sfm.hnair.net/?onlyContent=1&t=0.7775500487471136",
+                        "referrer": config.urls.referrer,
                         "referrerPolicy": "strict-origin-when-cross-origin",
                         "body": null,
                         "method": "GET",
@@ -2573,7 +2533,7 @@
                     const startFltDate = core.$('input[placeholder="开始日期"]').value;
                     const endFltDate = core.$('input[placeholder="结束日期"]').value;
 
-                    const url = `http://sfm.hnair.net/sfm-admin/priceCheck/exclude/list?page=1&limit=50&seg=${cityCodeText}&airline=&fltStartDate=${startFltDate}&fltEndDate=${endFltDate}`;
+                    const url = `${config.urls.excludeList}?page=1&limit=50&seg=${cityCodeText}&airline=&fltStartDate=${startFltDate}&fltEndDate=${endFltDate}`;
                     const response = await fetch(url, {
                         "headers": {
                             "accept": "application/json, text/plain, */*",
@@ -2581,7 +2541,7 @@
                             "request-starttime": Date.now().toString(),
                             "x-authorization": authorizationToken
                         },
-                        "referrer": "http://sfm.hnair.net/?onlyContent=1&t=0.6563835010594157",
+                        "referrer": config.urls.referrer,
                         "referrerPolicy": "strict-origin-when-cross-origin",
                         "body": null,
                         "method": "GET",
@@ -2612,7 +2572,8 @@
 
                 depCityCode = standardizeCityCode(depCityCode);
                 arrCityCode = standardizeCityCode(arrCityCode);
-                const url = `http://sfm.hnair.net/sfm-admin/priceCheck/rule/list?limit=50&depCityCode=${depCityCode}&arrCityCode=${arrCityCode}&airline=${airline}&fltStartDate=${startFltDate}&fltEndDate=${endFltDate}`;
+                // 使用config中的URL
+                const url = `${config.urls.ruleList}?limit=50&depCityCode=${depCityCode}&arrCityCode=${arrCityCode}&airline=${airline}&fltStartDate=${startFltDate}&fltEndDate=${endFltDate}`;
                 const headers = {
                     'Accept': 'application/json, text/plain, */*',
                     'X-Authorization': authorizationToken,
@@ -2636,7 +2597,8 @@
 
                     const params = this.constructHistoricalDataParams('job_18992');
 
-                    const url = `http://sfm.hnair.net/sfm-admin/im/autoimlog/list?limit=${params.limit}&jobId=${params.jobId}&origin=${encodeURIComponent(depCityCode)}&dest=${encodeURIComponent(arrCityCode)}&status=${encodeURIComponent(params.status)}&dataSource=${encodeURIComponent(params.dataSource)}&startFltDate=${encodeURIComponent(startFltDate)}&endFltDate=${encodeURIComponent(endFltDate)}&startCmdTime=${encodeURIComponent(params.startCmdTime)}&endCmdTime=${encodeURIComponent(params.endCmdTime)}&isCmd=${encodeURIComponent(params.isCmd)}&jobWarningType=${encodeURIComponent(params.jobWarningType)}`;
+                    // 使用config中的URL
+                    const url = `${config.urls.autoimlogList}?limit=${params.limit}&jobId=${params.jobId}&origin=${encodeURIComponent(depCityCode)}&dest=${encodeURIComponent(arrCityCode)}&status=${encodeURIComponent(params.status)}&dataSource=${encodeURIComponent(params.dataSource)}&startFltDate=${encodeURIComponent(startFltDate)}&endFltDate=${encodeURIComponent(endFltDate)}&startCmdTime=${encodeURIComponent(params.startCmdTime)}&endCmdTime=${encodeURIComponent(params.endCmdTime)}&isCmd=${encodeURIComponent(params.isCmd)}&jobWarningType=${encodeURIComponent(params.jobWarningType)}`;
                     const headers = {
                         'Accept': 'application/json, text/plain, */*',
                         'X-Authorization': authorizationToken
@@ -2666,7 +2628,8 @@
 
                     const params = this.constructCurrentDayDataParams('job_12815');
 
-                    const url = new URL("http://sfm.hnair.net/sfm-admin/im/autoimlog/list");
+                    // 使用config中的URL
+                    const url = new URL(config.urls.autoimlogList);
                     url.search = new URLSearchParams({
                         limit: params.limit,
                         jobId: params.jobId,
@@ -2776,7 +2739,8 @@
                 const { token: authorizationToken } = userInfo;
 
                 try {
-                    const response = await fetch(`http://sfm.hnair.net/sfm-admin/sys/sysfltseguser/listCurrent?page=1&limit=99999&startFltDate=${startFltDate}&endFltDate=${endFltDate}&attrType=%E5%9B%BD%E5%86%85`, {
+                    // 使用config中的URL
+                    const response = await fetch(`${config.urls.sysUserList}?page=1&limit=99999&startFltDate=${startFltDate}&endFltDate=${endFltDate}&attrType=%E5%9B%BD%E5%86%85`, {
                         "headers": {
                             "accept": "application/json, text/plain, */*",
                             "request-starttime": Date.now(),
@@ -2849,7 +2813,8 @@
                     const seg = `${user.origin}${user.dest}`;
                     const { startFltDate, endFltDate } = dataFetcher.getDateValues();
                     const { token: authorizationToken } = state.userInfo;
-                    const url = `http://sfm.hnair.net/sfm-admin/rtquery/longcmd/fltno?seg=${seg}&fltDateStart=${startFltDate}&fltDateEnd=${endFltDate}`;
+                    // 使用config中的URL
+                    const url = `${config.urls.longCmdFltno}?seg=${seg}&fltDateStart=${startFltDate}&fltDateEnd=${endFltDate}`;
 
                     const response = await fetch(url, {
                         headers: {
@@ -2884,7 +2849,8 @@
                         return null;
                     }
 
-                    const url = new URL("http://sfm.hnair.net/sfm-admin/basedata/basicdatabizreserveplan/list");
+                    // 使用config中的URL
+                    const url = new URL(config.urls.reservePlanList);
                     url.search = new URLSearchParams({
                         page: '1',
                         limit: '1',
@@ -2902,7 +2868,7 @@
                             "request-starttime": Date.now().toString(),
                             "x-authorization": authorizationToken
                         },
-                        "referrer": "http://sfm.hnair.net/?onlyContent=1&t=0.9296418786581169",
+                        "referrer": config.urls.referrer,
                         "referrerPolicy": "strict-origin-when-cross-origin",
                         "body": null,
                         "method": "GET",
