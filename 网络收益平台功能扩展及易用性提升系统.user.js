@@ -3669,7 +3669,7 @@
         };
     });
 
-    ModuleSystem.define('batchAVJ', ['core', 'state', 'uiOperations', 'dataEventManager'], function(core, state, uiOperations, dataEventManager) {
+    ModuleSystem.define('batchAVJ', ['core', 'state', 'uiOperations', 'dataEventManager', 'config'], function(core, state, uiOperations, dataEventManager, config) {
         // 检查功能是否启用
         if (!core.isFeatureEnabled("k_batchavjlong")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -3888,7 +3888,7 @@
         };
     });
 
-    ModuleSystem.define('tableFilterModule', ['core', 'state', 'batchAVJ'], function(core, state, batchAVJ) {
+    ModuleSystem.define('tableFilterModule', ['core', 'state', 'batchAVJ', 'config'], function(core, state, batchAVJ, config) {
 
         // 检查功能是否启用
         if (!core.isFeatureEnabled("k_batchavjlong")) {
