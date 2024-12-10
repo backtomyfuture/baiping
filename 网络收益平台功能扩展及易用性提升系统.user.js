@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.16
+// @version           1.0.17
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -254,6 +254,10 @@
 - 优化功能：对config中url部分的硬编码做了替换。
 - 优化功能：对config中selectors部分的硬编码做了替换。
 
+## 版本 1.0.17
+### 2024-12-10
+- 新增功能：新增了两场航班区别显示
+
 
 */
 
@@ -499,6 +503,13 @@
                     defaultValue: true
                 },
                 {
+                    id: 'secondaryAirport',
+                    text: '两场航班',
+                    hasCheckbox: true,
+                    storageKey: 'k_secondaryAirport',
+                    defaultValue: true
+                },
+                {
                     id: 'checkUpdate',
                     text: '检查更新',
                     hasCheckbox: false
@@ -538,6 +549,7 @@
                 cityCodeMap: {
                     'PEK': 'BJS', 'PKX': 'BJS', 'TFU': 'CTU', 'XIY': 'SIA', 'PVG':'SHA'
                 },
+                secondCity: ['PKX', 'TFU', 'PVG'],
                 maxRetries: 5,
                 retryDelay: 600,
                 weekdays: ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -1773,6 +1785,34 @@
                 console.log("state.loadFactorDifferences", state.loadFactorDifferences);
             }
 
+            function getSecondaryAirport() {
+                const filteredFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || 'null');
+                if (!filteredFlightList || !Array.isArray(filteredFlightList)) {
+                    return;
+                }
+            
+                const secondCityList = config.misc.secondCity;
+                const secondCityFlights = {};
+            
+                filteredFlightList.forEach(flight => {
+                    const origin = flight.origin;
+                    const dest = flight.dest;
+                    const key = `${flight.fltNo}_${flight.fltDate.split(' ')[0]}`;
+                    
+                    let number = 0;
+                    if (secondCityList.includes(origin)) number += 1;
+                    if (secondCityList.includes(dest)) number += 1;
+                    
+                    if (number > 0) {
+                        secondCityFlights[key] = { number };
+                    }
+                });
+            
+                // 将结果存储到 state 中
+                state.secondCity = secondCityFlights;
+                console.log("state.secondCity", state.secondCity);
+            }
+
             async function handleFlightControlRequest(xhr) {
                 console.log('拦截到航班控制列表请求');
 
@@ -1816,7 +1856,11 @@
 
                                 if (core.isFeatureEnabled("k_flightColor")) {
                                     getColor();
-                                    console.log("state.loadFactorDifferences", state.loadFactorDifferences);
+                                    // console.log("state.loadFactorDifferences", state.loadFactorDifferences);
+                                }
+                                // 在需要显示第二机场标记的地方调用
+                                if (core.isFeatureEnabled("k_secondaryAirport")) {
+                                    getSecondaryAirport();
                                 }
                             }
                         }
@@ -4183,6 +4227,36 @@
                 }
             });
         }
+
+        function showSecondaryAirportMark(tableContainer) {
+            const tableCells = tableContainer.querySelectorAll('.art-table-cell');
+            const secondCityFlights = state.secondCity;
+            if (!secondCityFlights) return;
+        
+            // 遍历 tableCells
+            tableCells.forEach(cell => {
+                const span = cell.querySelector("span[id^='data-']");
+                if (!span) return;
+        
+                // 如果已经添加过标记，则跳过
+                if (span.textContent.includes('@')) return;
+        
+                // 解析 span.id，例如 'data-2024-10-27-GS7917'
+                const idParts = span.id.split('-');
+                if (idParts.length >= 5) {
+                    const fltDate = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
+                    const fltNo = idParts[4];
+                    const key = `${fltNo}_${fltDate}`;
+        
+                    // 检查是否是二线城市航班
+                    const flightInfo = secondCityFlights[key];
+                    if (flightInfo) {
+                        // 直接在当前文本后添加对应数量的 @
+                        span.textContent += '@'.repeat(flightInfo.number);
+                    }
+                }
+            });
+        }
         
         // 根据差异值返回对应的颜色
         function getColorByDifference(difference) {
@@ -4344,6 +4418,9 @@
                     }
                     if (core.isFeatureEnabled("k_flightColor")) {
                         showColor(tableContainer); // 添加这一行
+                    }
+                    if (core.isFeatureEnabled("k_secondaryAirport")) {
+                        showSecondaryAirportMark(tableContainer);
                     }
 
                     // 调用新增的遍历函数
