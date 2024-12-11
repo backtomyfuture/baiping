@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.17
+// @version           1.0.18
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -258,6 +258,11 @@
 ### 2024-12-10
 - 新增功能：新增了两场航班区别显示
 
+## 版本 1.0.18
+### 2024-12-12
+- 优化功能：优化了elementObserver中三个观察函数，简化了代码；
+- 新增功能：新增了表格字体大小调整功能；
+
 
 */
 
@@ -425,13 +430,13 @@
 
             // 菜单项配置
             menuItems: [
-                //{
-                //    id: 'adjustInterval',
-                //    text: '调整间隔',
-                //    hasCheckbox: false,
-                //    storageKey: 'k_interval',
-                //    defaultValue: 50
-                //},
+                {
+                   id: 'adjustSize',
+                   text: '调整字体',
+                   hasCheckbox: false,
+                   storageKey: 'k_fontSize',
+                   defaultValue: 12
+                },
                 {
                     id: 'priceDisplay',
                     text: '价差显示',
@@ -523,7 +528,7 @@
 
             // 默认值配置
             defaults: {
-                interval: 50,
+                interval: 18,
                 allSeg: 'ALLSEG'
             },
 
@@ -980,7 +985,7 @@
                 toggleFeature(item);
             } else {
                 switch(item.id) {
-                    case 'adjustInterval': handleAdjustInterval(item); break;
+                    case 'adjustSize': handleAdjustInterval(item); break;
                     case 'checkUpdate': handleCheckUpdate(); break;
                     case 'about': handleAbout(); break;
                 }
@@ -999,15 +1004,17 @@
             toggleMenu('hide');
             showDialog(
                 item.text,
-                "建议间隔50秒",
-                "Go",
+                "系统默认12号，建议表格字体大小14号",
+                "确定",
                 (dialog) => {
                     const inputElement = core.$('#msg', dialog);
                     const newInterval = inputElement ? parseInt(inputElement.value, 10) : null;
                     if (newInterval && !isNaN(newInterval)) {
                         core.sv(item.storageKey, newInterval);
-                        console.log(`间隔已更新为 ${newInterval} 秒`);
+                        console.log(`表格字体大小已更新为 ${newInterval} 号`);
                         // 这里可以添加其他需要执行的逻辑
+
+
                     } else {
                         console.log('无效的输入，使用默认值');
                         core.sv(item.storageKey, item.defaultValue);
@@ -1952,6 +1959,27 @@
             init: function() {
                 moveButton();
                 removeButton();
+            }
+        };
+    });
+
+    ModuleSystem.define('changeFontSize', ['core', 'config', 'state'], function(core, config, state) {
+
+        function changeText() {
+            const fontSize = core.gv('k_fontSize', 12);
+            GM_addStyle(`
+                .ant-table-cell {
+                    font-size: ${fontSize}px !important;
+                }
+                .art-table-cell {
+                    font-size: ${fontSize}px !important;
+                }
+            `);
+        }
+
+        return {
+            init: function() {
+                changeText();
             }
         };
     });
@@ -4116,146 +4144,119 @@
 
         }
 
-        function showExcludeFlight(tableContainer) {
+        // 提取公共的 span ID 解析函数
+        function parseSpanId(span) {
+            if (!span || !span.id) return null;
+            const idParts = span.id.split('-');
+            if (idParts.length < 5) return null;
+
+            return {
+                date: `${idParts[1]}-${idParts[2]}-${idParts[3]}`,
+                fltNo: idParts[4],
+                key: `${idParts[4]}_${idParts[1]}-${idParts[2]}-${idParts[3]}`
+            };
+        }
+
+        // 提取公共的表格单元格处理函数
+        function processCells(tableContainer, processor) {
             const tableCells = tableContainer.querySelectorAll('.art-table-cell');
-            const today = new Date();
-            today.setHours(0, 0, 0, 0); // 仅比较日期部分
+            if (!tableCells.length) return;
 
-            const flightList = state.globalExcludeData;
-            if (!flightList) return; // 确保 flightList 存在
-
-            // 预先过滤出所有匹配的航班
-            const matchingFlights = flightList.filter(flight => {
-                return !flight.module.includes('自动化');
-            });
-
-            // 遍历 tableCells
             tableCells.forEach(cell => {
                 const span = cell.querySelector("span[id^='data-']");
-                const userInfo = state.userInfo;
-                const { airCompony } = userInfo;
+                if (!span) return;
 
-                if (cell.querySelector('.added-p-container') || cell.querySelector('.checked-p-container')) return;
+                const spanInfo = parseSpanId(span);
+                if (!spanInfo) return;
 
-                if (span && span.textContent.includes(airCompony)) {
-                    // 解析 span.id，例如 'data-2024-10-27-GS7917'
-                    cell.classList.add('checked-p-container'); // 添加类名以便后续检查
+                processor(cell, span, spanInfo);
+            });
+        }
 
-                    const idParts = span.id.split('-');
-                    if (idParts.length >= 5) {
-                        const fltDate = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
-                        const fltNo = idParts[4];
+        // 重构后的标记函数
+        function showSecondaryAirportMark(tableContainer) {
+            if (!state.secondCity) return;
 
-                        const flightDate = new Date(fltDate);
-                        flightDate.setHours(0, 0, 0, 0);
+            processCells(tableContainer, (cell, span, spanInfo) => {
+                if (span.textContent.includes('@')) return;
 
-                        // 计算日期差值（天数）
-                        const timeDiff = flightDate.getTime() - today.getTime();
-                        const dayDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
-
-                        // 遍历已经匹配的航班
-                        const applicableFlights = matchingFlights.filter(flight => {
-                            const isDateInRange = flightDate >= (new Date(flight.fltStartDate)).setHours(0, 0, 0, 0) && flightDate <= (new Date(flight.fltEndDate)).setHours(0, 0, 0, 0);
-                            const isDayDiffInRange = dayDiff >= flight.startDcp && dayDiff <= flight.endDcp;
-                            const isFltNoMatch = flight.fltNo === null || flight.fltNo === fltNo;
-
-                            return isDateInRange && isDayDiffInRange && isFltNoMatch;
-                        });
-
-                        if (applicableFlights.length > 0) {
-                            //console.log(`找到 ${applicableFlights.length} 个匹配的航班项：`, applicableFlights);
-
-                            for (const flight of applicableFlights) {
-                                const newDiv = cell.querySelector('div');
-                                cell.classList.add('added-p-container'); // 添加类名以便后续检查
-
-                                if (!newDiv.querySelector('.added-p')) {
-                                    const newSpan = document.createElement('span');
-                                    newSpan.style.width = '13px';
-                                    newSpan.style.height = '18px';
-                                    newSpan.style.background = 'url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmVyc2lvbj0iMS4xIj4KCiA8Zz4KICA8dGl0bGU+YmFja2dyb3VuZDwvdGl0bGU+CiAgPHJlY3QgZmlsbD0ibm9uZSIgaWQ9ImNhbnZhc19iYWNrZ3JvdW5kIiBoZWlnaHQ9IjgxNiIgd2lkdGg9IjE2MTMiIHk9Ii0xIiB4PSItMSIvPgogPC9nPgogPGc+CiAgPHRpdGxlPkxheWVyIDE8L3RpdGxlPgogIDxnIGlkPSJzdmdfMSIgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwtNSwtMjc0KSAiPgogICA8cGF0aCBpZD0ic3ZnXzIiIGZpbGw9IiM1OEFDRkEiIGZpbGwtcnVsZT0ibm9uemVybyIgZD0ibTIzLDI3NS40MDIxN2MtMC4wMDA3NywtMC43NTAwMyAtMC41NTk5NywtMS4zNTc4NSAtMS4yNSwtMS40MDIxN2wtMTUuNSwwYy0wLjY5MDAzLDAuMDQ0MzIgLTEuMjQ5MjMsMC42NTIxNCAtMS4yNSwxLjQwMjE3bDAsMjIuMDEwODdjMC4wMDAwNCwwLjMwMDEzIDAuMjIzODksMC41NDM0IDAuNSwwLjU0MzRjMC4wODkxMiwwIDAuMTc2NjIsLTAuMDI1ODkgMC4yNTM0NCwtMC4wNzQ5OWw4LjI0NjU2LC01LjI3MjU4bDguMjQ2NTYsNS4yNzI1OGMwLjA3NjgyLDAuMDQ5MSAwLjE2NDMyLDAuMDc0OTkgMC4yNTM0NCwwLjA3NDk5YzAuMjc2MTEsMCAwLjQ5OTk2LC0wLjI0MzI3IDAuNSwtMC41NDM0bDAsLTIyLjAxMDg3eiIvPgogIDwvZz4KICA8dGV4dCBmb250LXdlaWdodD0ibm9ybWFsIiBmb250LXN0eWxlPSJub3JtYWwiIHN0cm9rZT0iIzAwMCIgdHJhbnNmb3JtPSJtYXRyaXgoMS4xMTMxMjM1NTg3NzAxNjk2LDAsMCwxLjIsLTAuOTY3MDI0NzQ3NjQ0ODk4OCwwKSAiIHhtbDpzcGFjZT0icHJlc2VydmUiIHRleHQtYW5jaG9yPSJzdGFydCIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGlkPSJzdmdfMyIgeT0iMTEuNTUiIHg9IjMuNTUiIHN0cm9rZS13aWR0aD0iMCIgZmlsbD0iI2ZmZmZmZiI+UDwvdGV4dD4KIDwvZz4KPC9zdmc+Cg==") center center / 80% no-repeat';
-                                    newSpan.style.cursor = 'pointer';
-                                    newSpan.style.display = 'inline-block';
-                                    newSpan.classList.add('added-p'); // 添加类名以便后续检查
-
-                                    // 将 <span> 添加到 <div>
-                                    newDiv.appendChild(newSpan);
-
-                                    //console.log('已添加 "P" 图标到:', cell);
-                                    break; // 找到后退出循环
-                                }
-                            }
-                        }
-                    }
+                const flightInfo = state.secondCity[spanInfo.key];
+                if (flightInfo) {
+                    span.textContent += '@'.repeat(flightInfo.number);
                 }
             });
         }
 
         function showColor(tableContainer) {
-            const tableCells = tableContainer.querySelectorAll('.art-table-cell');
-            const loadFactorDifferences = state.loadFactorDifferences;
-            if (!loadFactorDifferences) return;
-        
-            // 遍历 tableCells
-            tableCells.forEach(cell => {
-                const span = cell.querySelector("span[id^='data-']");
-                if (!span) return;
+            if (!state.loadFactorDifferences) return;
 
+            processCells(tableContainer, (cell, span, spanInfo) => {
                 if (cell.querySelector('.added-color')) return;
-        
-                // 解析 span.id，例如 'data-2024-10-27-GS7917'
-                const idParts = span.id.split('-');
-                if (idParts.length >= 5) {
-                    const fltDate = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
-                    const fltNo = idParts[4];
-                    const key = `${fltNo}_${fltDate}`;
-        
-                    // 获取该航班的客座率差异数据
-                    const loadFactorInfo = loadFactorDifferences[key];
-                    if (loadFactorInfo) {
-                        // 获取差异百分比
-                        const difference = loadFactorInfo.difference;
-                        
-                        // 设置颜色
-                        const color = getColorByDifference(difference);
-                        
-                        cell.style.backgroundColor = color;
-                        cell.style.borderTop = '1px solid #f0f0f0';
 
-                        cell.classList.add('added-color'); // 添加类名以便后续检查
-                    }
+                const loadFactorInfo = state.loadFactorDifferences[spanInfo.key];
+                if (loadFactorInfo) {
+                    const color = getColorByDifference(loadFactorInfo.difference);
+                    cell.style.backgroundColor = color;
+                    cell.style.borderTop = '1px solid #f0f0f0';
+                    cell.classList.add('added-color');
                 }
             });
         }
 
-        function showSecondaryAirportMark(tableContainer) {
-            const tableCells = tableContainer.querySelectorAll('.art-table-cell');
-            const secondCityFlights = state.secondCity;
-            if (!secondCityFlights) return;
-        
-            // 遍历 tableCells
-            tableCells.forEach(cell => {
-                const span = cell.querySelector("span[id^='data-']");
-                if (!span) return;
-        
-                // 如果已经添加过标记，则跳过
-                if (span.textContent.includes('@')) return;
-        
-                // 解析 span.id，例如 'data-2024-10-27-GS7917'
-                const idParts = span.id.split('-');
-                if (idParts.length >= 5) {
-                    const fltDate = `${idParts[1]}-${idParts[2]}-${idParts[3]}`;
-                    const fltNo = idParts[4];
-                    const key = `${fltNo}_${fltDate}`;
-        
-                    // 检查是否是二线城市航班
-                    const flightInfo = secondCityFlights[key];
-                    if (flightInfo) {
-                        // 直接在当前文本后添加对应数量的 @
-                        span.textContent += '@'.repeat(flightInfo.number);
-                    }
+        function showExcludeFlight(tableContainer) {
+            if (!state.globalExcludeData) return;
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const matchingFlights = state.globalExcludeData.filter(flight => 
+                !flight.module.includes('自动化')
+            );
+
+            processCells(tableContainer, (cell, span, spanInfo) => {
+                if (cell.querySelector('.added-p-container') || 
+                    cell.querySelector('.checked-p-container')) return;
+
+                const { airCompony } = state.userInfo;
+                if (!span.textContent.includes(airCompony)) return;
+
+                cell.classList.add('checked-p-container');
+
+                const flightDate = new Date(spanInfo.date);
+                flightDate.setHours(0, 0, 0, 0);
+                const dayDiff = Math.ceil((flightDate - today) / (1000 * 3600 * 24));
+
+                const applicableFlights = matchingFlights.filter(flight => {
+                    const isDateInRange = flightDate >= new Date(flight.fltStartDate) && 
+                                        flightDate <= new Date(flight.fltEndDate);
+                    const isDayDiffInRange = dayDiff >= flight.startDcp && 
+                                        dayDiff <= flight.endDcp;
+                    const isFltNoMatch = !flight.fltNo || flight.fltNo === spanInfo.fltNo;
+
+                    return isDateInRange && isDayDiffInRange && isFltNoMatch;
+                });
+
+                if (applicableFlights.length > 0) {
+                    addPIcon(cell);
                 }
             });
+        }
+
+        // 提取添加 P 图标的逻辑
+        function addPIcon(cell) {
+            const newDiv = cell.querySelector('div');
+            if (!newDiv || newDiv.querySelector('.added-p')) return;
+
+            cell.classList.add('added-p-container');
+            const newSpan = document.createElement('span');
+            newSpan.className = 'added-p';
+            newSpan.style.cssText = `
+                width: 13px;
+                height: 18px;
+                background: url("data:image/svg+xml;base64,...") center center / 80% no-repeat;
+                cursor: pointer;
+                display: inline-block;
+            `;
+            newDiv.appendChild(newSpan);
         }
         
         // 根据差异值返回对应的颜色
@@ -4422,10 +4423,6 @@
                     if (core.isFeatureEnabled("k_secondaryAirport")) {
                         showSecondaryAirportMark(tableContainer);
                     }
-
-                    // 调用新增的遍历函数
-                    //showExcludeFlight(tableContainer);
-                    //core.debounce(showExcludeFlight, 500);
                 }
             },
             getFlightInfo: getFlightInfo,
@@ -4688,8 +4685,8 @@
         };
     });
 
-    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver', 'lowestCabin'],
-                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver, lowestCabin) {
+    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI','changeFontSize', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver', 'lowestCabin'],
+                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, changeFontSize, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver, lowestCabin) {
 
         // 确定当前环境
         function determineEnvironment() {
@@ -4731,7 +4728,7 @@
             // 初始化其他不依赖 MutationObserver 的模块...
             menuManager.init();
             apiHookManager.init();
-
+            changeFontSize.init();
         }
 
         function initObserver(environment) {
