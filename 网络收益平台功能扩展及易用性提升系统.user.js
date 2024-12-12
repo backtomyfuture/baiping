@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.18
+// @version           1.0.19
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -260,8 +260,11 @@
 
 ## 版本 1.0.18
 ### 2024-12-12
-- 优化功能：优化了elementObserver中三个观察函数，简化了代码；
-- 新增功能：新增了表格字体大小调整功能；
+- 新增功能：新增了表格字体大小调整功能
+
+## 版本 1.0.19
+### 2024-12-15
+- 新增功能：新增了导出表格数据的功能
 
 
 */
@@ -512,6 +515,13 @@
                     text: '两场航班',
                     hasCheckbox: true,
                     storageKey: 'k_secondaryAirport',
+                    defaultValue: true
+                },
+                {
+                    id: 'exportTable',
+                    text: '导出表格',
+                    hasCheckbox: true,
+                    storageKey: 'k_exportTable',
                     defaultValue: true
                 },
                 {
@@ -1959,6 +1969,97 @@
             init: function() {
                 moveButton();
                 removeButton();
+            }
+        };
+    });
+
+    ModuleSystem.define('exportTable', ['core', 'config', 'state'], function(core, config, state) {
+
+        if (!core.isFeatureEnabled("k_exportTable")) {
+            return { init: function() {} }; // 返回空的初始化函数
+        }
+
+        async function addExportButton() {
+            const targetModal = core.$('.ant-modal-body');
+            if (!targetModal || targetModal.querySelector('.batch-add-button')) return;
+
+            // 检查标题是否包含"上客航班"
+            const modalTitle = core.$('.ant-modal-title');
+            if (!modalTitle || !modalTitle.textContent.includes('上客航班')) return;
+
+            const buttonGroup = document.createElement('div');
+            buttonGroup.style.display = 'flex';
+            buttonGroup.style.alignItems = 'center';
+            buttonGroup.style.gap = '8px'; // 添加间距
+
+            const batchButton = createbatchButton();
+
+            buttonGroup.appendChild(batchButton);
+            batchButton.addEventListener('click', exportTableToCSV);
+
+            targetModal.appendChild(buttonGroup);
+        }
+
+        async function exportTableToCSV() {
+            // 获取表格元素
+            const table = document.querySelector('.ant-modal-body');
+            if (!table) return;
+        
+            // 获取表头
+            const headers = [];
+            table.querySelectorAll('thead th').forEach(header => {
+                headers.push(header.textContent.trim());
+            });
+        
+            // 获取表格内容
+            const rows = [];
+            table.querySelectorAll('tbody tr').forEach(row => {
+                const rowData = [];
+                row.querySelectorAll('td').forEach(cell => {
+                    rowData.push(cell.textContent.trim());
+                });
+                rows.push(rowData);
+            });
+        
+            // 组合 CSV 内容
+            let csvContent = headers.join(',') + '\n';
+            rows.forEach(row => {
+                csvContent += row.join(',') + '\n';
+            });
+        
+            // 创建 Blob 对象
+            const blob = new Blob(["\ufeff" + csvContent], { 
+                type: 'text/csv;charset=utf-8;' 
+            });
+        
+            // 创建下载链接
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', '乘客信息.csv');
+            link.style.visibility = 'hidden';
+        
+            // 触发下载
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function createbatchButton() {
+            const batchButton = document.createElement('button');
+            batchButton.type = 'button';
+            batchButton.className = 'ant-btn ant-btn-primary batch-add-button';
+            batchButton.style.height = '32px';
+            batchButton.style.padding = '0 15px';
+            batchButton.style.fontSize = '14px';
+            batchButton.style.lineHeight = '1';
+            batchButton.innerHTML = '<span>导出表格</span>';
+            return batchButton;
+        }
+
+        return {
+            init: function() {
+                addExportButton();
             }
         };
     });
@@ -4236,27 +4337,30 @@
                 });
 
                 if (applicableFlights.length > 0) {
-                    addPIcon(cell);
+                    //console.log(`找到 ${applicableFlights.length} 个匹配的航班项：`, applicableFlights);
+
+                    for (const flight of applicableFlights) {
+                        const newDiv = cell.querySelector('div');
+                        cell.classList.add('added-p-container'); // 添加类名以便后续检查
+
+                        if (!newDiv.querySelector('.added-p')) {
+                            const newSpan = document.createElement('span');
+                            newSpan.style.width = '13px';
+                            newSpan.style.height = '18px';
+                            newSpan.style.background = 'url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmVyc2lvbj0iMS4xIj4KCiA8Zz4KICA8dGl0bGU+YmFja2dyb3VuZDwvdGl0bGU+CiAgPHJlY3QgZmlsbD0ibm9uZSIgaWQ9ImNhbnZhc19iYWNrZ3JvdW5kIiBoZWlnaHQ9IjgxNiIgd2lkdGg9IjE2MTMiIHk9Ii0xIiB4PSItMSIvPgogPC9nPgogPGc+CiAgPHRpdGxlPkxheWVyIDE8L3RpdGxlPgogIDxnIGlkPSJzdmdfMSIgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwtNSwtMjc0KSAiPgogICA8cGF0aCBpZD0ic3ZnXzIiIGZpbGw9IiM1OEFDRkEiIGZpbGwtcnVsZT0ibm9uemVybyIgZD0ibTIzLDI3NS40MDIxN2MtMC4wMDA3NywtMC43NTAwMyAtMC41NTk5NywtMS4zNTc4NSAtMS4yNSwtMS40MDIxN2wtMTUuNSwwYy0wLjY5MDAzLDAuMDQ0MzIgLTEuMjQ5MjMsMC42NTIxNCAtMS4yNSwxLjQwMjE3bDAsMjIuMDEwODdjMC4wMDAwNCwwLjMwMDEzIDAuMjIzODksMC41NDM0IDAuNSwwLjU0MzRjMC4wODkxMiwwIDAuMTc2NjIsLTAuMDI1ODkgMC4yNTM0NCwtMC4wNzQ5OWw4LjI0NjU2LC01LjI3MjU4bDguMjQ2NTYsNS4yNzI1OGMwLjA3NjgyLDAuMDQ5MSAwLjE2NDMyLDAuMDc0OTkgMC4yNTM0NCwwLjA3NDk5YzAuMjc2MTEsMCAwLjQ5OTk2LC0wLjI0MzI3IDAuNSwtMC41NDM0bDAsLTIyLjAxMDg3eiIvPgogIDwvZz4KICA8dGV4dCBmb250LXdlaWdodD0ibm9ybWFsIiBmb250LXN0eWxlPSJub3JtYWwiIHN0cm9rZT0iIzAwMCIgdHJhbnNmb3JtPSJtYXRyaXgoMS4xMTMxMjM1NTg3NzAxNjk2LDAsMCwxLjIsLTAuOTY3MDI0NzQ3NjQ0ODk4OCwwKSAiIHhtbDpzcGFjZT0icHJlc2VydmUiIHRleHQtYW5jaG9yPSJzdGFydCIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGlkPSJzdmdfMyIgeT0iMTEuNTUiIHg9IjMuNTUiIHN0cm9rZS13aWR0aD0iMCIgZmlsbD0iI2ZmZmZmZiI+UDwvdGV4dD4KIDwvZz4KPC9zdmc+Cg==") center center / 80% no-repeat';
+                            newSpan.style.cursor = 'pointer';
+                            newSpan.style.display = 'inline-block';
+                            newSpan.classList.add('added-p'); // 添加类名以便后续检查
+
+                            // 将 <span> 添加到 <div>
+                            newDiv.appendChild(newSpan);
+
+                            //console.log('已添加 "P" 图标到:', cell);
+                            break; // 找到后退出循环
+                        }
+                    }
                 }
             });
-        }
-
-        // 提取添加 P 图标的逻辑
-        function addPIcon(cell) {
-            const newDiv = cell.querySelector('div');
-            if (!newDiv || newDiv.querySelector('.added-p')) return;
-
-            cell.classList.add('added-p-container');
-            const newSpan = document.createElement('span');
-            newSpan.className = 'added-p';
-            newSpan.style.cssText = `
-                width: 13px;
-                height: 18px;
-                background: url("data:image/svg+xml;base64,...") center center / 80% no-repeat;
-                cursor: pointer;
-                display: inline-block;
-            `;
-            newDiv.appendChild(newSpan);
         }
         
         // 根据差异值返回对应的颜色
@@ -4685,8 +4789,8 @@
         };
     });
 
-    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI','changeFontSize', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ','tableFilterModule', 'elementObserver', 'tooltipObserver', 'lowestCabin'],
-                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, changeFontSize, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver, lowestCabin) {
+    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI','changeFontSize', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ', 'tableFilterModule', 'elementObserver', 'tooltipObserver', 'lowestCabin', 'exportTable'],
+                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, changeFontSize, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver, lowestCabin, exportTable) {
 
         // 确定当前环境
         function determineEnvironment() {
@@ -4740,6 +4844,7 @@
                     switch(environment) {
                         case 'planeAdaptIframe':
                             enhanceUI.init();
+                            exportTable.init();
                             lowestCabin.init();
                             batchPolicy.init();
                             elementObserver.init(mutations);
