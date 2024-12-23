@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.19
+// @version           1.0.20
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -265,6 +265,11 @@
 ## 版本 1.0.19
 ### 2024-12-15
 - 新增功能：新增了导出表格数据的功能
+
+## 版本 1.0.20
+### 2024-12-23
+- 新增功能：新增了statisticsModule模块，用来统计用户行为，同时在不同模块中增加了对应的调用
+
 
 
 */
@@ -1827,7 +1832,7 @@
             
                 // 将结果存储到 state 中
                 state.secondCity = secondCityFlights;
-                console.log("state.secondCity", state.secondCity);
+                // console.log("state.secondCity", state.secondCity);
             }
 
             async function handleFlightControlRequest(xhr) {
@@ -1973,7 +1978,7 @@
         };
     });
 
-    ModuleSystem.define('exportTable', ['core', 'config', 'state'], function(core, config, state) {
+    ModuleSystem.define('exportTable', ['core', 'state', 'config', 'statisticsModule'], function(core, state, config, statisticsModule) {
 
         if (!core.isFeatureEnabled("k_exportTable")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -2001,6 +2006,12 @@
         }
 
         async function exportTableToCSV() {
+
+            //获取'ant-modal-header'标题上的内容
+            const modalTitle = core.$('.ant-modal-header');
+            if (!modalTitle) return;
+            const modalTitleText = modalTitle.textContent.trim();
+
             // 获取表格元素
             const table = document.querySelector('.ant-modal-body');
             if (!table) return;
@@ -2043,6 +2054,13 @@
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+
+            // 添加统计
+            statisticsModule.trackEvent('导出旅客信息', {
+                
+                pageTitle: modalTitleText,  // 记录导出时的页面标题
+                rowCount: rows.length       // 记录导出的数据行数
+            });
         }
 
         function createbatchButton() {
@@ -3068,7 +3086,7 @@
             saveMenuData: function(data) {
                 sessionStorage.setItem('menuData', JSON.stringify(data));
                 state.menuData = data;
-                console.log('已经获取了排除航班类型数据:', data);
+                console.log('已经获取排除航班类型数据:', data);
             },
 
             saveLeaderData: function(data) {
@@ -3092,7 +3110,7 @@
         };
     });
 
-    ModuleSystem.define('excludeFlight', ['core', 'state', 'uiOperations', 'config'], function(core, state, uiOperations, config) {
+    ModuleSystem.define('excludeFlight', ['core', 'state', 'uiOperations', 'config', 'statisticsModule'], function(core, state, uiOperations, config, statisticsModule) {
         let isFillingForm = false;
 
         if (!core.isFeatureEnabled("k_quickNavigation")) {
@@ -3147,6 +3165,15 @@
                 sessionStorage.removeItem('currentJob');
                 sessionStorage.removeItem('excludeFlightInfo');
                 console.log('表单填充结束');
+
+                // 在成功填充表单后添加统计，记录更详细的信息
+                statisticsModule.trackEvent('自动化排除航班', {
+                    flightNumber: excludeFlightInfo.flightNumber,
+                    segment: excludeFlightInfo.origin + excludeFlightInfo.dest,
+                    date: excludeFlightInfo.date,
+                    module: currentModule  // 记录是经济舱还是公务舱排除
+                });
+
             }
         }
 
@@ -3221,8 +3248,9 @@
         };
     });
 
-    ModuleSystem.define('batchPolicy', ['core', 'state', 'uiOperations', 'menuManager', 'config'], function(core, state, uiOperations, menuManager, config) {
-
+    ModuleSystem.define('batchPolicy', ['core', 'state', 'uiOperations', 'menuManager', 'config', 'statisticsModule'], 
+        function(core, state, uiOperations, menuManager, config, statisticsModule) {
+    
         if (!core.isFeatureEnabled("k_bulkCabinChange")) {
             return { init: function() {} }; // 返回空的初始化函数
         }
@@ -3390,6 +3418,11 @@
             const cabinPricePolicyStorage = getCabinPricePolicyStorage();
             const selectedOption = document.getElementById('batch-filter-select').value;
             const filteredItems = filterCabinPricePolicy(cabinPricePolicyStorage, selectedOption);
+
+            // 简化统计，只记录项目数量
+            statisticsModule.trackEvent('政策批量提报', {
+                itemCount: filteredItems.length
+            });
 
             let shouldContinue = true;
             let totalUpdates = 0;
@@ -3842,7 +3875,7 @@
         };
     });
 
-    ModuleSystem.define('batchAVJ', ['core', 'state', 'uiOperations', 'dataEventManager', 'config'], function(core, state, uiOperations, dataEventManager, config) {
+    ModuleSystem.define('batchAVJ', ['core', 'state', 'uiOperations', 'config', 'dataEventManager', 'statisticsModule'], function(core, state, uiOperations, config, dataEventManager, statisticsModule) {
         // 检查功能是否启用
         if (!core.isFeatureEnabled("k_batchavjlong")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -3928,7 +3961,8 @@
             });
 
             select.addEventListener('change', (event) => {
-                console.log(`选择了 ${event.target.value}`);
+                const selectedText = event.target.options[event.target.selectedIndex].textContent.split(' / ')[0];
+                console.log("当前选择的用户是:", selectedText);
             });
         }
 
@@ -3943,8 +3977,11 @@
             console.log("批量查询按钮被点击");
 
             const selectUser = core.$('#select_user');
-            const selectedValue = selectUser ? selectUser.value : null;
-            console.log("当前选择的值:", selectedValue);
+            const selectedValue = selectUser?.value || null;  // 这里获取的是 value，比如 "658"
+            const selectedOption = selectUser?.querySelector(`option[value="${selectedValue}"]`);
+            const selectedText = selectedOption?.textContent.split(' / ')[0] || null;  // 这样就能获取到 "井倩"
+
+            console.log("当前选择的用户是:", selectedText);  // 会显示 "井倩" 而不是 "658"
 
             if (!selectedValue) {
                 window.top.message.error("请选择航管");
@@ -3956,6 +3993,15 @@
                 await updateSegInput();
                 await updateFltNosInput();
                 clickQueryButton();
+
+                // 等待表格加载完成
+                await core.delay(1000);  // 给表格加载一些时间
+
+                // 添加统计，使用航管姓名而不是ID
+                statisticsModule.trackEvent('批量长指令查询', {
+                    operator: selectedText,  // 使用航管姓名
+                });
+
             } catch (error) {
                 console.error("批量查询过程中发生错误:", error);
                 window.top.message.error("批量查询失败，请重试");
@@ -4165,7 +4211,7 @@
         };
     });
 
-    ModuleSystem.define('elementObserver', ['core', 'state','config', 'indicesManager'], function(core, state,config, indicesManager) {
+    ModuleSystem.define('elementObserver', ['core', 'state', 'config', 'indicesManager'], function(core, state, config, indicesManager) {
 
         if (!core.isFeatureEnabled("k_priceDisplay") && !core.isFeatureEnabled("k_syncDisplay") || !core.$('#refresh')) {
             return { init: function() {} };
@@ -4533,7 +4579,7 @@
         };
     });
 
-    ModuleSystem.define('tooltipObserver', ['core', 'state', 'config'], function(core, state, config) {
+    ModuleSystem.define('tooltipObserver', ['core', 'state', 'config', 'statisticsModule'], function(core, state, config, statisticsModule) {
 
         if (!core.isFeatureEnabled("k_priceDisplay") && !core.isFeatureEnabled("k_syncDisplay")) {
             return { init: function() {} }; // 返回空的初始化函数
@@ -4719,6 +4765,7 @@
 
             const elementType = state.currentElementType;
 
+            // 在这里新增statisticsModule统计            
             if (targetAirCompany === airCompony || (airCompony === "HU" && targetAirCompany === "CN")) {
                 if (fetchedData && state.priceList) {
                     if (elementType === config.ELEMENT_TYPES.ECONOMIC_PRICE) {
@@ -4727,30 +4774,53 @@
                         let price = getLowestPrice(cabinType, fetchedData, state.priceList, targetDate, today);
                         content += `<div>${price !== null ? price : '未设置一线一策'}</div>`;
                         tooltipElement.innerHTML = content;
+                        // 增加一个price判断
+                        if (price !== null) {
+                            statisticsModule.trackEvent('查看经济舱最低价格', {targetFlight: targetFlight, targetDate: targetDate});
+                        }
                     } else if (elementType === config.ELEMENT_TYPES.BUSINESS_PRICE) {
                         content += "<div>公务舱最低价格：</div>";
                         const cabinType = '公务舱';
                         let price = getLowestPrice(cabinType, fetchedData, state.priceList, targetDate, today);
                         content += `<div>${price !== null ? price : '未设置一线一策'}</div>`;
                         tooltipElement.innerHTML = content;
+                        // 增加一个price判断
+                        if (price !== null) {
+                            statisticsModule.trackEvent('查看公务舱最低价格', {targetFlight: targetFlight, targetDate: targetDate});
+                        }
                     }
                 }
                 if (additionalData && !state.priceList) {
                     if (elementType === config.ELEMENT_TYPES.DATE_FLIGHT) {
-                        content += processSyncDatePriceData(additionalData, targetFlight, targetDate);
+                        let text = processSyncDatePriceData(additionalData, targetFlight, targetDate);
+                        content += text;
                         tooltipElement.innerHTML += content;
+                        // 增加一个content判断
+                        if (text !== null) {
+                            statisticsModule.trackEvent('查看历史同期价格', {targetFlight: targetFlight, targetDate: targetDate});
+                        }
                     }
                 }
                 // 新增客座率处理逻辑
                 if (loadFactorData && elementType === config.ELEMENT_TYPES.LOAD_FACTOR) {
-                    content += processLoadFactorData(loadFactorData, targetFlight, targetDate);
+                    let text = processLoadFactorData(loadFactorData, targetFlight, targetDate);
+                    content += text;
                     tooltipElement.innerHTML += content;
+                    // 增加一个content判断
+                    if (text !== null) {
+                        statisticsModule.trackEvent('查看历史同期客座率', {targetFlight: targetFlight, targetDate: targetDate});
+                    }
                 }
             } else {
                 if (fetchedData) {
                     if (elementType === config.ELEMENT_TYPES.DATE_FLIGHT) {
-                        content += processPriceDiffData(fetchedData, targetFlight, targetDate, today);
+                        let text = processPriceDiffData(fetchedData, targetFlight, targetDate, today);
+                        content += text;
                         tooltipElement.innerHTML += content;
+                        // 增加一个content判断
+                        if (text !== null) {
+                            statisticsModule.trackEvent('查看外航价差', {targetFlight: targetFlight, targetDate: targetDate});
+                        }
                     }
                 }
             }
@@ -4789,8 +4859,108 @@
         };
     });
 
-    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI','changeFontSize', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ', 'tableFilterModule', 'elementObserver', 'tooltipObserver', 'lowestCabin', 'exportTable'],
-                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, changeFontSize, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver, lowestCabin, exportTable) {
+    ModuleSystem.define('statisticsModule', ['core', 'state', 'config'], function(core, state, config) {
+        const STATS_ENDPOINT = 'http://10.78.14.164:5001/collect';
+        const VERSION = GM_info.script.version;
+        const SESSION_ID = Date.now().toString(36) + Math.random().toString(36).substr(2);
+        
+        const sentEvents = new Set();
+        
+        function getUserInfo() {
+            try {
+                return JSON.parse(localStorage.getItem('userInfo')) || {};
+            } catch (e) {
+                console.error('Error parsing userInfo:', e);
+                return {};
+            }
+        }
+        
+        function sanitizeUserInfo(userInfo) {
+            return {
+                account: userInfo.account || 'unknown',
+                userName: userInfo.userName || 'unknown',
+                airCompony: userInfo.airCompony || 'unknown'
+            };
+        }
+        
+        function generateEventId(eventName, details) {
+            return `${eventName}_${JSON.stringify(details)}_${SESSION_ID}`;
+        }
+        
+        async function sendStatistics(eventName, details = {}) {
+            // 使用 Promise.race 和超时控制
+            const TIMEOUT = 3000; // 3秒超时
+            
+            const eventId = generateEventId(eventName, details);
+            if (sentEvents.has(eventId)) return;
+            
+            const userInfo = sanitizeUserInfo(getUserInfo());
+            
+            const data = {
+                timestamp: new Date().toISOString(),
+                version: VERSION,
+                sessionId: SESSION_ID,
+                eventName: eventName,
+                eventDetails: details,
+                userInfo: userInfo
+            };
+
+            // 创建一个超时 Promise
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Timeout')), TIMEOUT);
+            });
+
+            // 创建请求 Promise
+            const fetchPromise = fetch(STATS_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            });
+
+            // 使用 Promise.race 和静默错误处理
+            Promise.race([fetchPromise, timeoutPromise])
+                .then(response => {
+                    if (response.ok) {
+                        sentEvents.add(eventId);
+                        console.log(`Statistics sent successfully: ${eventName}`);
+                    }
+                })
+                .catch(() => {
+                    // 静默处理错误，不影响主程序
+                    console.debug(`Failed to send statistics for ${eventName}, continuing silently`);
+                });
+        }
+        
+        // 收集所有功能的启用状态
+        function collectFeatureStatus() {
+            const featureStatus = {};
+            config.menuItems.forEach(item => {
+                // 只收集有 checkbox 的菜单项状态
+                if (item.storageKey && item.hasCheckbox) {
+                    featureStatus[item.text] = core.isFeatureEnabled(item.storageKey);
+                }
+            });
+            return featureStatus;
+        }
+        
+        function initStatistics() {
+            // 发送安装/更新事件
+            sendStatistics('脚本初始化');
+            
+            // 发送一次性的功能启用状态
+            sendStatistics('功能启用统计', collectFeatureStatus());
+        }
+        
+        return {
+            init: initStatistics,
+            trackEvent: sendStatistics
+        };
+    });
+
+    ModuleSystem.define('controller', ['core', 'state', 'menuManager', 'indicesManager', 'apiHookManager', 'enhanceUI','changeFontSize', 'enhanceUIWithContextMenu', 'dataEventManager', 'excludeFlight','batchPolicy', 'batchAVJ', 'tableFilterModule', 'elementObserver', 'tooltipObserver', 'lowestCabin', 'exportTable', 'statisticsModule'],
+                        function(core, state, menuManager, indicesManager, apiHookManager, enhanceUI, changeFontSize, enhanceUIWithContextMenu, dataEventManager, excludeFlight, batchPolicy, batchAVJ, tableFilterModule, elementObserver, tooltipObserver, lowestCabin, exportTable, statisticsModule) {
 
         // 确定当前环境
         function determineEnvironment() {
@@ -4828,11 +4998,15 @@
             }
         }
 
-        function loadDefaultAction() {
-            // 初始化其他不依赖 MutationObserver 的模块...
+        function loadDefaultAction(environment) {
             menuManager.init();
             apiHookManager.init();
             changeFontSize.init();
+            
+            // 只在主页面初始化统计模块
+            if (environment === 'mainPage') {
+                statisticsModule.init();
+            }
         }
 
         function initObserver(environment) {
@@ -4866,8 +5040,8 @@
 
         return {
             init: function() {
-                loadDefaultAction();
                 const environment = determineEnvironment();
+                loadDefaultAction(environment);  // 传入 environment
                 initByEnvironment(environment);
                 initObserver(environment);
             }
