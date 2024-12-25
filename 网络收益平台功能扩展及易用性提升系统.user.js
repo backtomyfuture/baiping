@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.20
+// @version           1.0.21
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -9,6 +9,7 @@
 // @connect           github.com
 // @connect           greasyfork.org
 // @connect           sfm.hnair.net
+// @connect           www.tianjinairlines.cn
 // @grant             GM_addStyle
 // @grant             GM_addElement
 // @grant             GM_setValue
@@ -269,6 +270,10 @@
 ## 版本 1.0.20
 ### 2024-12-23
 - 新增功能：新增了statisticsModule模块，用来统计用户行为，同时在不同模块中增加了对应的调用
+
+## 版本 1.0.21
+### 2024-12-26
+- 优化功能：新增了statisticsModule的备用服务器，同时采用HTTPS来发送请求
 
 
 
@@ -4860,102 +4865,103 @@
     });
 
     ModuleSystem.define('statisticsModule', ['core', 'state', 'config'], function(core, state, config) {
-        const STATS_ENDPOINT = 'http://10.78.14.164:5001/collect';
+        // 统计功能开关
+        const ENABLE_STATISTICS = true;  // 在这里控制是否启用统计功能
+        
+        const ENDPOINTS = {
+            primary: 'http://10.78.14.164:5001/collect',
+            backup: 'https://www.tianjinairlines.cn:15001/collect'
+        };
         const VERSION = GM_info.script.version;
         const SESSION_ID = Date.now().toString(36) + Math.random().toString(36).substr(2);
-        
         const sentEvents = new Set();
-        
-        function getUserInfo() {
-            try {
-                return JSON.parse(localStorage.getItem('userInfo')) || {};
-            } catch (e) {
-                console.error('Error parsing userInfo:', e);
-                return {};
-            }
+
+        // 检查功能是否启用
+        function isEnabled() {
+            return ENABLE_STATISTICS;
         }
-        
-        function sanitizeUserInfo(userInfo) {
-            return {
-                account: userInfo.account || 'unknown',
-                userName: userInfo.userName || 'unknown',
-                airCompony: userInfo.airCompony || 'unknown'
-            };
-        }
-        
+
         function generateEventId(eventName, details) {
             return `${eventName}_${JSON.stringify(details)}_${SESSION_ID}`;
         }
-        
-        async function sendStatistics(eventName, details = {}) {
-            // 使用 Promise.race 和超时控制
-            const TIMEOUT = 3000; // 3秒超时
-            
+
+        async function sendStatistics(endpoint, data, timeout = 3000) {
+            if (!isEnabled()) return; // 如果功能未启用，直接返回
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data),
+                    signal: controller.signal
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                throw error;
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        async function sendWithFailover(eventName, details = {}) {
+            if (!isEnabled()) return; // 如果功能未启用，直接返回
+
             const eventId = generateEventId(eventName, details);
             if (sentEvents.has(eventId)) return;
-            
-            const userInfo = sanitizeUserInfo(getUserInfo());
-            
+
             const data = {
                 timestamp: new Date().toISOString(),
                 version: VERSION,
                 sessionId: SESSION_ID,
                 eventName: eventName,
                 eventDetails: details,
-                userInfo: userInfo
+                userInfo: state.userInfo
             };
 
-            // 创建一个超时 Promise
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Timeout')), TIMEOUT);
-            });
-
-            // 创建请求 Promise
-            const fetchPromise = fetch(STATS_ENDPOINT, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data)
-            });
-
-            // 使用 Promise.race 和静默错误处理
-            Promise.race([fetchPromise, timeoutPromise])
-                .then(response => {
-                    if (response.ok) {
-                        sentEvents.add(eventId);
-                        console.log(`Statistics sent successfully: ${eventName}`);
-                    }
-                })
-                .catch(() => {
-                    // 静默处理错误，不影响主程序
-                    console.debug(`Failed to send statistics for ${eventName}, continuing silently`);
-                });
+            try {
+                await sendStatistics(ENDPOINTS.primary, data);
+                sentEvents.add(eventId);
+            } catch (primaryError) {
+                try {
+                    await sendStatistics(ENDPOINTS.backup, data);
+                    sentEvents.add(eventId);
+                } catch (backupError) {
+                    // 两个服务器都失败，直接放弃
+                }
+            }
         }
-        
-        // 收集所有功能的启用状态
+
         function collectFeatureStatus() {
             const featureStatus = {};
             config.menuItems.forEach(item => {
-                // 只收集有 checkbox 的菜单项状态
                 if (item.storageKey && item.hasCheckbox) {
                     featureStatus[item.text] = core.isFeatureEnabled(item.storageKey);
                 }
             });
             return featureStatus;
         }
-        
-        function initStatistics() {
-            // 发送安装/更新事件
-            sendStatistics('脚本初始化');
-            
-            // 发送一次性的功能启用状态
-            sendStatistics('功能启用统计', collectFeatureStatus());
-        }
-        
+
         return {
-            init: initStatistics,
-            trackEvent: sendStatistics
+            init: function() {
+                if (!isEnabled()) return; // 如果功能未启用，不执行初始化
+                sendWithFailover('脚本初始化');
+                sendWithFailover('功能启用统计', collectFeatureStatus());
+            },
+
+            trackEvent: function(eventName, details = {}) {
+                if (!isEnabled()) return; // 如果功能未启用，不执行事件追踪
+                sendWithFailover(eventName, details).catch(() => {});
+            }
         };
     });
 
@@ -4986,6 +4992,8 @@
                     break;
                 case 'planeAdaptIframe':
                     indicesManager.init();
+                    // 在这里初始化统计
+                    statisticsModule.init();
                     break;
                 case 'excludeFlightIframe':
                     //initExcludeFlightIframe();
@@ -4998,15 +5006,10 @@
             }
         }
 
-        function loadDefaultAction(environment) {
+        function loadDefaultAction() {
             menuManager.init();
             apiHookManager.init();
             changeFontSize.init();
-            
-            // 只在主页面初始化统计模块
-            if (environment === 'mainPage') {
-                statisticsModule.init();
-            }
         }
 
         function initObserver(environment) {
@@ -5040,8 +5043,8 @@
 
         return {
             init: function() {
+                loadDefaultAction();  
                 const environment = determineEnvironment();
-                loadDefaultAction(environment);  // 传入 environment
                 initByEnvironment(environment);
                 initObserver(environment);
             }
