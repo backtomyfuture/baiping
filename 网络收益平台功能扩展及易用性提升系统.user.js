@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.21
+// @version           1.0.22
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -274,6 +274,10 @@
 ## 版本 1.0.21
 ### 2024-12-26
 - 优化功能：新增了statisticsModule的备用服务器，同时采用HTTPS来发送请求
+
+## 版本 1.0.22
+### 2025-01-07
+- 优化功能：关闭了统计功能
 
 
 
@@ -4866,7 +4870,7 @@
 
     ModuleSystem.define('statisticsModule', ['core', 'state', 'config'], function(core, state, config) {
         // 统计功能开关
-        const ENABLE_STATISTICS = true;  // 在这里控制是否启用统计功能
+        const ENABLE_STATISTICS = false;  // 在这里控制是否启用统计功能
         
         const ENDPOINTS = {
             primary: 'http://10.78.14.164:5001/collect',
