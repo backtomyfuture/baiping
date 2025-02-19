@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              网络收益平台功能扩展及易用性提升系统
 // @description       这是一款提高海航白屏系统拓展能力和效率的插件，后续会不断添加新功能，目前已经有的功能包括：价差提取、界面优化、批量调舱、历史价格显示，后续计划更新甩飞公务舱价格显示、最优价格提示、最优客座率提示、价差市场类型提醒等，如果有新的需求也可以直接联系我。
-// @version           1.0.22
+// @version           1.0.23
 // @author            q-fu
 // @namespace         https://github.com/backtomyfuture/baiping/
 // @supportURL        https://nas.tianjin-air.com/drive/d/s/zsZUD2GpJIUSfEKSwH8zeSpVcY5T9Dtp/A3hbpQRrvngJb0749HdJfptBYNvXVnkj-9scAiaQHoAs
@@ -279,6 +279,12 @@
 ### 2025-01-07
 - 优化功能：关闭了统计功能
 
+## 版本 1.0.23
+### 2025-02-19
+- 精简功能：因为预案最低舱元素的移除，去掉了这部分功能
+- 优化功能：优化了apiHookManager中拦截请求的处理机制，现在变成最后统一处理；
+- 新增功能：在apiHookManager中新增了processCapacityData，用来处理运力数据，同时在elementObserver中新增了showCapacityInfo函数用来显示运力；
+
 
 
 */
@@ -503,13 +509,13 @@
                     storageKey: 'k_interfaceOptimization',
                     defaultValue: true
                 },
-                {
-                    id: 'lowestCabin',
-                    text: '预案最低舱',
-                    hasCheckbox: true,
-                    storageKey: 'k_lowestCabin',
-                    defaultValue: true
-                },
+                // {
+                //     id: 'lowestCabin',
+                //     text: '预案最低舱',
+                //     hasCheckbox: true,
+                //     storageKey: 'k_lowestCabin',
+                //     defaultValue: false
+                // },
                 {
                     id: 'excludeFlight',
                     text: '排除航班显示',
@@ -529,6 +535,13 @@
                     text: '两场航班',
                     hasCheckbox: true,
                     storageKey: 'k_secondaryAirport',
+                    defaultValue: true
+                },
+                {
+                    id: 'totalCapacity',
+                    text: '汇总运力显示',
+                    hasCheckbox: true,
+                    storageKey: 'k_totalCapacity',
                     defaultValue: true
                 },
                 {
@@ -579,6 +592,11 @@
                     'PEK': 'BJS', 'PKX': 'BJS', 'TFU': 'CTU', 'XIY': 'SIA', 'PVG':'SHA'
                 },
                 secondCity: ['PKX', 'TFU', 'PVG'],
+                airportMap: {
+                    'PKX': 'PEK',  // 大兴机场映射到首都机场
+                    'TFU': 'CTU',  // 天府机场映射到双流机场
+                    'PVG': 'SHA'   // 浦东机场映射到虹桥机场
+                },
                 maxRetries: 5,
                 retryDelay: 600,
                 weekdays: ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -662,6 +680,9 @@
         let _globalLoadFactorData = null;
         let _globalExcludeData = null;
         let _loadFactorDifferences = null;
+        let _secondCity = {};
+        let _totalCapacity = {};
+
 
         // 用于存储初始值的对象
         let _initialValues = {
@@ -795,6 +816,20 @@
             },
             set loadFactorDifferences(data) {
                 _loadFactorDifferences = data;
+            },
+
+            get secondCity() {
+                return _secondCity;
+            },
+            set secondCity(data) {
+                _secondCity = data;
+            },
+
+            get totalCapacity() {
+                return _totalCapacity;
+            },
+            set totalCapacity(data) {
+                _totalCapacity = data;
             },
 
             // 重置所有状态
@@ -1754,53 +1789,46 @@
                 return false;
             }
 
-            function getColor() {
+            // 处理颜色数据（增量方式）
+            function processColorData(newFlights) {
                 const loadFactorData = state.globalLoadFactorData;
                 if (!loadFactorData || !Array.isArray(loadFactorData)) {
                     return;
                 }
-            
-                const filteredFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || 'null');
-                if (!filteredFlightList || !Array.isArray(filteredFlightList)) {
-                    return;
-                }
-            
-                // 创建一个对象来存储客座率差值
-                const loadFactorDifferences = {};
-            
-                // 创建一个 Map 来存储历史客座率
+
+                // 1. 创建临时的历史客座率映射
                 const historicalLoadFactorMap = new Map();
-            
-                // 首先处理历史客座率数据
+                
+                // 2. 初始化历史客座率映射
                 loadFactorData.forEach(flight => {
-                    const fltNo = flight.fltNo;
-                    const fltDate = flight.fltDate;
-            
                     if (flight.remark) {
                         try {
                             const remarkObj = JSON.parse(flight.remark);
                             const historicalLoadFactor = remarkObj["去年同期客座率"];
-                            if (historicalLoadFactor !== null && fltNo && fltDate) {
-                                const key = `${fltNo}_${fltDate}`;
+                            if (historicalLoadFactor !== null && flight.fltNo && flight.fltDate) {
+                                const key = `${flight.fltNo}_${flight.fltDate}`;
                                 historicalLoadFactorMap.set(key, historicalLoadFactor);
                             }
                         } catch (e) {
-                            console.warn(`无法解析航班 ${fltNo} 于 ${fltDate} 的 remark 字段:`, e);
+                            console.warn(`无法解析航班 ${flight.fltNo} 于 ${flight.fltDate} 的 remark 字段:`, e);
                         }
                     }
                 });
-            
-                // 处理当前客座率并计算差值
-                filteredFlightList.forEach(flight => {
+                // console.log("历史客座率映射大小:", historicalLoadFactorMap);
+
+                // 3. 获取现有的差值数据
+                const loadFactorDifferences = state.loadFactorDifferences || {};
+
+                // 4. 处理新增航班数据
+                newFlights.forEach(flight => {
                     const fltNo = flight.fltNo;
                     const fltDate = flight.fltDate.split(' ')[0];
                     const key = `${fltNo}_${fltDate}`;
                     
                     const historicalLoadFactor = historicalLoadFactorMap.get(key);
                     const currentLoadFactor = flight.lf ? parseFloat(flight.lf) / 100 : null;
-            
+
                     if (historicalLoadFactor !== undefined && currentLoadFactor !== null) {
-                        // 计算差值（当前客座率 - 历史客座率）
                         const difference = (currentLoadFactor - historicalLoadFactor).toFixed(4);
                         
                         loadFactorDifferences[key] = {
@@ -1810,22 +1838,25 @@
                         };
                     }
                 });
-            
-                // 将结果存储到 state 中
+
+                // console.log("处理过的客座率差值数据:", loadFactorDifferences);
+
+                // 5. 更新状态
                 state.loadFactorDifferences = loadFactorDifferences;
-                console.log("state.loadFactorDifferences", state.loadFactorDifferences);
+                historicalLoadFactorMap.clear();
             }
 
-            function getSecondaryAirport() {
-                const filteredFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || 'null');
-                if (!filteredFlightList || !Array.isArray(filteredFlightList)) {
+            function processSecondaryAirportData(newFlights) {
+                if (!newFlights || !Array.isArray(newFlights)) {
                     return;
                 }
             
                 const secondCityList = config.misc.secondCity;
-                const secondCityFlights = {};
+                // 获取现有的二线城市航班数据
+                const secondCityFlights = state.secondCity || {};
             
-                filteredFlightList.forEach(flight => {
+                // 只处理新增航班数据
+                newFlights.forEach(flight => {
                     const origin = flight.origin;
                     const dest = flight.dest;
                     const key = `${flight.fltNo}_${flight.fltDate.split(' ')[0]}`;
@@ -1839,10 +1870,198 @@
                     }
                 });
             
-                // 将结果存储到 state 中
+                // 更新状态
                 state.secondCity = secondCityFlights;
-                // console.log("state.secondCity", state.secondCity);
             }
+
+            function processCapacityData(newFlights) {
+                if (!newFlights || !Array.isArray(newFlights)) {
+                    return;
+                }
+            
+                // 获取现有的汇总数据并转换回对象格式
+                const totalCapacity = {};
+                const existingData = state.totalCapacity || {};
+                
+                // 将已存在的格式化数据转换回对象格式
+                Object.entries(existingData).forEach(([key, value]) => {
+                    if (typeof value === 'string') {
+                        // 处理包含载客率的格式 "book/max/rate"
+                        const [book, max, rate] = value.split('/');
+                        totalCapacity[key] = {
+                            totalBook: parseInt(book) || 0,
+                            totalMax: parseInt(max) || 0
+                        };
+                    } else {
+                        totalCapacity[key] = value;
+                    }
+                });
+
+                // 处理数字字符串的辅助函数
+                function sumNumbers(numStr) {
+                    if (!numStr) return 0;
+                    return numStr.split('/').reduce((sum, num) => sum + (parseInt(num) || 0), 0);
+                }
+
+                // 计算载客率的辅助函数
+                function calculateLoadFactor(book, max) {
+                    if (!max) return 0;
+                    return Math.round((book / max) * 100);
+                }
+
+                // 处理新增航班数据
+                newFlights.forEach(flight => {
+                    const key = flight.fltDate.split(' ')[0];  // 只使用日期作为key
+                    
+                    if (!totalCapacity[key]) {
+                        totalCapacity[key] = {
+                            totalBook: 0,
+                            totalMax: 0
+                        };
+                    }
+
+                    // 累加销售数和运力数
+                    totalCapacity[key].totalBook += sumNumbers(flight.book);
+                    totalCapacity[key].totalMax += sumNumbers(flight.max);
+                });
+
+                // 更新格式化后的结果
+                const formattedResults = {};
+                Object.entries(totalCapacity).forEach(([key, value]) => {
+                    const loadFactor = calculateLoadFactor(value.totalBook, value.totalMax);
+                    formattedResults[key] = `${value.totalBook}/${value.totalMax}/${loadFactor}%`;
+                });
+
+                // 更新状态
+                state.totalCapacity = formattedResults;
+                console.log("日期运力汇总:", JSON.parse(JSON.stringify(state.totalCapacity)));
+            }
+
+            function getDateValues() {
+                const startDateInput = core.$("input[placeholder='开始日期']");
+                const endDateInput = core.$("input[placeholder='结束日期']");
+
+                const startFltDate = startDateInput ? startDateInput.value : '';
+                const endFltDate = endDateInput ? endDateInput.value : '';
+
+                return { startFltDate, endFltDate };
+            }
+
+            function createRequestQueue() {
+                let processingTimer = null;
+                const queue = [];
+                let expectedRequestCount = null;
+                let lastRequestTime = null;
+                const REQUEST_IDLE_TIMEOUT = 6000; // 单次请求间隔超时时间，5秒
+
+                function calculateExpectedRequests() {
+                    const { startFltDate, endFltDate } = getDateValues();
+                    if (!startFltDate || !endFltDate) return null;
+
+                    const start = new Date(startFltDate);
+                    const end = new Date(endFltDate);
+                    const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+                    
+                    return Math.ceil(daysDiff / 3);
+                }
+
+                function processQueue() {
+                    if (queue.length === 0) return;
+
+                    console.log(`=== 批处理开始 ===`);
+                    console.log(`预期请求数: ${expectedRequestCount}, 实际接收到: ${queue.length} 个请求`);
+                    
+                    // 合并所有队列中的数据
+                    const allFlights = queue.reduce((acc, flights) => acc.concat(flights), []);
+                    console.log(`合并后共有 ${allFlights.length} 条航班数据`);
+                    
+                    // 去重处理
+                    const uniqueFlights = Array.from(
+                        allFlights.reduce((map, flight) => {
+                            const key = `${flight.fltNo}_${flight.fltDate}`;
+                            if (!map.has(key)) {
+                                map.set(key, flight);
+                            }
+                            return map;
+                        }, new Map()).values()
+                    );
+                    console.log(`去重后剩余 ${uniqueFlights.length} 条航班数据`);
+
+                    // 批量处理数据
+                    if (core.isFeatureEnabled("k_flightColor")) {
+                        processColorData(uniqueFlights);
+                    }
+                    if (core.isFeatureEnabled("k_secondaryAirport")) {
+                        processSecondaryAirportData(uniqueFlights);
+                    }
+                    if (core.isFeatureEnabled("k_totalCapacity")) {
+                        processCapacityData(uniqueFlights);
+                    }
+
+                    // 更新累积列表
+                    const accumulatedFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || '[]');
+                    const newList = accumulatedFlightList.concat(uniqueFlights);
+                    sessionStorage.setItem('filteredFlightList', JSON.stringify(newList));
+
+                    console.log(`=== 批处理完成 ===`);
+                    
+                    // 重置所有状态
+                    queue.length = 0;
+                    expectedRequestCount = null;
+                    lastRequestTime = null;
+                    if (processingTimer) {
+                        clearTimeout(processingTimer);
+                        processingTimer = null;
+                    }
+                }
+
+                function checkIdleTimeout() {
+                    if (processingTimer) {
+                        clearTimeout(processingTimer);
+                    }
+
+                    processingTimer = setTimeout(() => {
+                        const idleTime = Date.now() - lastRequestTime;
+                        if (idleTime >= REQUEST_IDLE_TIMEOUT) {
+                            console.log(`请求间隔超过 ${REQUEST_IDLE_TIMEOUT}ms，判定为请求结束`);
+                            console.log(`预期请求数: ${expectedRequestCount}, 实际接收到: ${queue.length}`);
+                            processQueue();
+                        }
+                    }, REQUEST_IDLE_TIMEOUT);
+                }
+
+                return {
+                    add(flights) {
+                        const currentTime = Date.now();
+                        
+                        // 第一个请求到达时计算预期请求数
+                        if (expectedRequestCount === null) {
+                            expectedRequestCount = calculateExpectedRequests();
+                            console.log(`计算得到预期请求数: ${expectedRequestCount}`);
+                        }
+
+                        queue.push(flights);
+                        lastRequestTime = currentTime;
+                        console.log(`新请求加入队列，当前队列长度: ${queue.length}/${expectedRequestCount}`);
+
+                        // 如果达到预期请求数，立即处理
+                        if (queue.length === expectedRequestCount) {
+                            console.log('已收到所有预期请求，立即处理队列');
+                            if (processingTimer) {
+                                clearTimeout(processingTimer);
+                            }
+                            processQueue();
+                            return;
+                        }
+
+                        // 检查请求间隔超时
+                        checkIdleTimeout();
+                    }
+                };
+            }
+
+            // 创建请求队列管理器
+            const requestQueue = createRequestQueue();
 
             async function handleFlightControlRequest(xhr) {
                 console.log('拦截到航班控制列表请求');
@@ -1872,27 +2091,13 @@
                                     fltDate: flight.fltDate,
                                     fltNo: flight.fltNo,
                                     seg: flight.seg,
-                                    lf:flight.lf,
+                                    lf: flight.lf,
+                                    book: flight.book,
+                                    max: flight.max,
                                 }));
 
-                                // 获取现有的累积列表
-                                let accumulatedFlightList = JSON.parse(sessionStorage.getItem('filteredFlightList') || '[]');
-
-                                // 将新的过滤后的航班添加到累积列表中
-                                accumulatedFlightList = accumulatedFlightList.concat(filteredList);
-
-                                // 存储筛选后的数据到 sessionStorage
-                                sessionStorage.setItem('filteredFlightList', JSON.stringify(accumulatedFlightList));
-                                console.log('已将筛选后的航班数据存储到 sessionStorage');
-
-                                if (core.isFeatureEnabled("k_flightColor")) {
-                                    getColor();
-                                    // console.log("state.loadFactorDifferences", state.loadFactorDifferences);
-                                }
-                                // 在需要显示第二机场标记的地方调用
-                                if (core.isFeatureEnabled("k_secondaryAirport")) {
-                                    getSecondaryAirport();
-                                }
+                                // 将数据添加到队列中，而不是立即处理
+                                requestQueue.add(filteredList);
                             }
                         }
                         if (originalOnLoad) {
@@ -2114,9 +2319,16 @@
 
     ModuleSystem.define('lowestCabin', ['core', 'config', 'state'], function(core, config, state) {
 
-        if (!core.isFeatureEnabled("k_lowestCabin")) {
-            return { init: function() {} }; // 返回空的初始化函数
+        // 添加一个开关来控制是否启用此功能
+        const FEATURE_ENABLED = false; // 设置为 false 来禁用功能
+
+        if (!FEATURE_ENABLED) {
+            return { init: function() {} };
         }
+
+        // if (!core.isFeatureEnabled("k_lowestCabin")) {
+        //     return { init: function() {} }; // 返回空的初始化函数
+        // }
 
         function changeElementText() {
             const element = core.$(config.selectors.lowestCabinPlan);
@@ -2477,7 +2689,7 @@
                 const tableElement = core.$('.art-table');
                 if (tableElement && !tableElement.hasAttribute('click-getLowestCabin-added')) {
                     console.log("给面板表格增加了点击事件");
-                    tableElement.addEventListener('click', eventTrigger.handleLayoutContentClick);
+                    // tableElement.addEventListener('click', eventTrigger.handleLayoutContentClick);
                     tableElement.setAttribute('click-getLowestCabin-added', 'true');
                 }
             },
@@ -2501,6 +2713,21 @@
             },
 
             triggerDataFetch: function() {
+
+                state.globalLoadFactorData = null;  
+                
+                // 清空数据
+                if (core.isFeatureEnabled("k_flightColor")) {
+                    state.loadFactorDifferences = {};
+                }
+                if (core.isFeatureEnabled("k_secondaryAirport")) {
+                    state.secondCity = {};
+                }
+                if (core.isFeatureEnabled("k_totalCapacity")) {
+                    state.totalCapacity = {};
+                }
+
+                // 获取数据
                 if (core.isFeatureEnabled("k_quickNavigation")) {
                     dataFetcher.getMenuData();
                     dataFetcher.getLeaderList();
@@ -2523,12 +2750,10 @@
                 if (core.isFeatureEnabled("k_loadFactorDisplay")) {
                     dataFetcher.fetchLoadFactorData();
                 }
-                if (core.isFeatureEnabled("k_lowestCabin")) {
-                    state.lowestCabin = '无';
-                }
-                if (core.isFeatureEnabled("k_flightColor")) {
-                    state.loadFactorDifferences = null;
-                }
+                // if (core.isFeatureEnabled("k_lowestCabin")) {
+                //     state.lowestCabin = '无';
+                // }
+
             },
 
             handleLayoutContentClick: function(event) {
@@ -4359,6 +4584,39 @@
             });
         }
 
+        // 显示总运力
+        function showCapacityInfo(tableContainer) {
+            if (!state.totalCapacity) return;
+
+            const dateCells = tableContainer.querySelectorAll('.art-table-cell.first');
+            dateCells.forEach(cell => {
+                // 检查是否已经添加过运力信息
+                if (cell.querySelector('.capacity-info-added')) return;
+
+                const dateDiv = cell.querySelector('.date-div div.date-div span div.date-div');
+                if (!dateDiv) return;
+
+                const dateText = dateDiv.textContent;
+                if (!dateText) return;
+
+                // 直接获取该日期的运力数据
+                const capacityData = state.totalCapacity[dateText];
+                if (capacityData) {
+                    // 创建新的运力显示div
+                    const capacityDiv = document.createElement('div');
+                    capacityDiv.className = 'date-div capacity-info-added'; // 添加标记类名
+                    capacityDiv.style.cssText = 'line-height: 13px; color: rgb(51, 51, 51);';
+                    capacityDiv.textContent = capacityData;
+
+                    // 添加到正确的位置
+                    const parentDiv = cell.querySelector('.date-div .date-div');
+                    if (parentDiv) {
+                        parentDiv.appendChild(capacityDiv);
+                    }
+                }
+            });
+        }
+
         function showExcludeFlight(tableContainer) {
             if (!state.globalExcludeData) return;
 
@@ -4581,6 +4839,10 @@
                     }
                     if (core.isFeatureEnabled("k_secondaryAirport")) {
                         showSecondaryAirportMark(tableContainer);
+                    }
+                    // 添加运力信息显示
+                    if (core.isFeatureEnabled("k_totalCapacity")) {
+                        showCapacityInfo(tableContainer);
                     }
                 }
             },
